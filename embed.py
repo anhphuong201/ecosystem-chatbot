@@ -52,26 +52,37 @@ def query_bot(q: Query):
 
     # 3. Semantic search in programs (vector search)
     # Supabase RPC function 'match_program' should be defined using vector search on program.embedding
+        # Increase match_count before filtering
     result = supabase.rpc("match_program", {
         "query_embedding": query_embedding,
-        "match_count": 5  # number of results to return
+        "match_count": 20
     }).execute().data or []
+    
 
     # 4. Apply province filter
     if province_filter:
         result = [row for row in result if row.get("province") in province_filter]
 
+    # Filter by similarity threshold
+    result = [row for row in result if row.get("similarity", 0) > 0.3]
+
     # 5. Fallback to organization if no programs found
     if not result:
         result = supabase.rpc("match_organization", {
             "query_embedding": query_embedding,
-            "match_count": 5
+            "match_count": 20
         }).execute().data or []
         if province_filter:
             result = [row for row in result if row.get("province") in province_filter]
-
-    # 6. Build structured JSON response
+        result = [row for row in result if row.get("similarity", 0) > 0.3]
+# Build context
+    if not result:
+        return {"answer": "I'm sorry, I couldn't find any relevant programs or organizations matching your question. Try rephrasing or selecting a different province."}
+    
+    context_text = ""
     response = []
+    
+    # 6. Build structured JSON response
     for row in result:
         response.append({
             "program_name": row.get("program"),
@@ -84,7 +95,6 @@ def query_bot(q: Query):
         })
 
         # Build a single text block from results
-    context_text = ""
     for r in response:
         context_text += f"""
     Program: {r.get('program_name')}
@@ -97,13 +107,34 @@ def query_bot(q: Query):
     """
 
     # Generate a natural language answer using OpenAI
+        # Improved prompt
     completion = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are an ecosystem assistant. Using provided data and information in links provided."},
-            {"role": "user", "content": f"User question: {q.question}\n\nRelevant data:\n{context_text}"}
+            {
+                "role": "system",
+                "content": """You are a helpful ecosystem assistant for Atlantic innovation ecosystem. You give advice about research labs, innovation programs and organizations.
+When answering:
+- Startups, spinoffs also means entrepreneurs.
+- Be specific and reference the actual program/organization names from the data
+- Include relevant links when available
+- If the data doesn't perfectly match the question, mention the closest relevant programs
+- Keep answers concise and friendly
+- If no relevant data is found, say so clearly"""
+            },
+            {
+                "role": "user",
+                "content": f"""User question: {q.question}
+Province filter: {q.province or 'None'}
+
+Relevant programs and organizations found:
+{context_text}
+
+Please answer the user's question based on this data."""
+            }
         ]
     )
+    
 
     # Return chat-ready answer
 
@@ -118,5 +149,6 @@ app.mount("/static", StaticFiles(directory="."), name="static")
 @app.get("/")
 def serve_chat():
     return FileResponse("chat.html")
+
 
 
