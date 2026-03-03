@@ -131,22 +131,23 @@
           body: JSON.stringify(body)
         });
 
+        console.log("Status:", res.status);
         const data = await res.json();
+        console.log("Response:", data);
+        
         messagesDiv.removeChild(typing);
-        addMessage(data.answer, "bot");
+
+        if (data.answer) {
+          addMessage(data.answer, "bot");
+        } else {
+          addMessage("No answer returned: " + JSON.stringify(data), "bot");
+        }
+
       } catch (err) {
         messagesDiv.removeChild(typing);
-        addMessage("Sorry, something went wrong. Please try again.", "bot");
-      }
-
-      btn.disabled = false;
-      input.focus();
-    }
-
-    btn.addEventListener("click", sendMessage);
-    input.addEventListener("keydown", e => {
-      if (e.key === "Enter") sendMessage();
-    });
+        console.error("Full error:", err);
+        addMessage("Error: " + err.message, "bot");
+      };
   </script>
 </body>
 </html>
