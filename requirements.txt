@@ -2,6 +2,5 @@ fastapi
 uvicorn[standard]
 openai
 supabase
-
 python-dotenv
 aiofiles
