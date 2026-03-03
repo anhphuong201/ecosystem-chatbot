@@ -109,3 +109,14 @@ def query_bot(q: Query):
 
     return {"answer": completion.choices[0].message.content}
 
+# UI Html for chatbot
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+app.mount("/static", StaticFiles(directory="."), name="static")
+
+@app.get("/")
+def serve_chat():
+    return FileResponse("chat.html")
+
+
