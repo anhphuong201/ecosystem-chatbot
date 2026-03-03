@@ -91,7 +91,7 @@
     </div>
   </div>
 
-  <script>
+    <script>
     const API_URL = "https://ecosystem-chatbot.onrender.com/query";
 
     const messagesDiv = document.getElementById("messages");
@@ -134,7 +134,7 @@
         console.log("Status:", res.status);
         const data = await res.json();
         console.log("Response:", data);
-        
+
         messagesDiv.removeChild(typing);
 
         if (data.answer) {
@@ -147,7 +147,17 @@
         messagesDiv.removeChild(typing);
         console.error("Full error:", err);
         addMessage("Error: " + err.message, "bot");
-      };
+      }
+
+      btn.disabled = false;
+      input.focus();
+    }
+
+    btn.addEventListener("click", sendMessage);
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") sendMessage();
+    });
   </script>
+
 </body>
 </html>
