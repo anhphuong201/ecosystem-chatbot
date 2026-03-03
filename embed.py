@@ -7,9 +7,9 @@ from pydantic import BaseModel
 app = FastAPI()
 
 # Keys
-OPENAI_API_KEY = ""
-SUPABASE_URL = ""
-SUPABASE_KEY = ""
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -108,3 +108,4 @@ def query_bot(q: Query):
     # Return chat-ready answer
 
     return {"answer": completion.choices[0].message.content}
+
