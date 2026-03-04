@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Ecosystem Chatbot</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; background: #f5f5f5; }
@@ -30,21 +31,14 @@
       line-height: 1.4;
       font-size: 14px;
     }
-    .user {
-      background: #0070f3;
-      color: white;
-      align-self: flex-end;
-    }
-    .bot {
-      background: #e9e9e9;
-      color: #333;
-      align-self: flex-start;
-    }
+    .user { background: #0070f3; color: white; align-self: flex-end; }
+    .bot { background: #e9e9e9; color: #333; align-self: flex-start; }
     #input-area {
       display: flex;
       padding: 12px;
       border-top: 1px solid #ddd;
       gap: 8px;
+      flex-wrap: wrap;
     }
     #province-select {
       padding: 10px;
@@ -59,6 +53,7 @@
       border-radius: 8px;
       font-size: 14px;
       outline: none;
+      min-width: 120px;
     }
     #send-btn {
       padding: 10px 16px;
@@ -76,7 +71,7 @@
 <body>
   <div id="chat-container">
     <div id="messages">
-      <div class="message bot">Hi! Ask me about the programs, labs, resources for research or entrepreneurship in Atlantic Canada. You can also select the province below.</div>
+      <div class="message bot">Hi! Ask me about programs, labs, and resources for research or entrepreneurship in Atlantic Canada. Select your province below.</div>
     </div>
     <div id="input-area">
       <select id="province-select">
@@ -91,8 +86,20 @@
     </div>
   </div>
 
-    <script>
-    const API_URL = "https://ecosystem-chatbot.onrender.com/query";
+  <script>
+    const SUPABASE_URL = ""; 
+    const SUPABASE_KEY = "";
+    const OPENAI_API_KEY = "";
+
+    const ATLANTIC_PROVINCES = ["NS", "NL", "PE", "NB"];
+
+    function expandProvince(province) {
+      if (province === "Atlantic Canada") return [...ATLANTIC_PROVINCES, "Atlantic Canada"];
+      if (ATLANTIC_PROVINCES.includes(province)) return [province, "Atlantic Canada"];
+      return [province];
+    }
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const messagesDiv = document.getElementById("messages");
     const input = document.getElementById("user-input");
@@ -105,6 +112,22 @@
       div.textContent = text;
       messagesDiv.appendChild(div);
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    async function generateEmbedding(text) {
+      const res = await fetch("https://api.openai.com/v1/embeddings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "text-embedding-3-small",
+          input: text
+        })
+      });
+      const data = await res.json();
+      return data.data[0].embedding;
     }
 
     async function sendMessage() {
@@ -121,31 +144,75 @@
       messagesDiv.appendChild(typing);
 
       try {
-        const body = { question };
         const province = provinceSelect.value;
-        if (province) body.province = province;
+        const provinceFilter = expandProvince(province);
+        const embedding = await generateEmbedding(question);
 
-        const res = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
+        // Search programs
+        let { data: results } = await supabaseClient.rpc("match_program", {
+          query_embedding: embedding,
+          match_count: 20
         });
 
-        console.log("Status:", res.status);
-        const data = await res.json();
-        console.log("Response:", data);
+        results = (results || []).filter(r => provinceFilter.includes(r.province) && (r.similarity || 0) > 0.3);
+
+        // Fallback to organizations
+        if (results.length === 0) {
+          let { data: orgResults } = await supabaseClient.rpc("match_organization", {
+            query_embedding: embedding,
+            match_count: 20
+          });
+          results = (orgResults || []).filter(r => provinceFilter.includes(r.province) && (r.similarity || 0) > 0.3);
+        }
+
+        if (results.length === 0) {
+          messagesDiv.removeChild(typing);
+          addMessage("I couldn't find any relevant programs or organizations. Try rephrasing your question.", "bot");
+          btn.disabled = false;
+          input.focus();
+          return;
+        }
+
+        // Build context
+        const context = results.map(r => `
+Program: ${r.program || "N/A"}
+Description: ${r.program_description || r.org_description || "N/A"}
+Organization: ${r.organization_name || "N/A"}
+Province: ${r.province || "N/A"}
+Link: ${r.program_link || r.org_link || "N/A"}
+---`).join("\n");
+
+        // Ask GPT
+        const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${OPENAI_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: "You are a helpful ecosystem assistant for Canadian innovation programs and organizations. Be specific, reference program names, include links, and keep answers concise and friendly."
+              },
+              {
+                role: "user",
+                content: `Question: ${question}\nProvince: ${province}\n\nRelevant data:\n${context}`
+              }
+            ]
+          })
+        });
+
+        const chatData = await chatRes.json();
+        const answer = chatData.choices[0].message.content;
 
         messagesDiv.removeChild(typing);
-
-        if (data.answer) {
-          addMessage(data.answer, "bot");
-        } else {
-          addMessage("No answer returned: " + JSON.stringify(data), "bot");
-        }
+        addMessage(answer, "bot");
 
       } catch (err) {
         messagesDiv.removeChild(typing);
-        console.error("Full error:", err);
+        console.error(err);
         addMessage("Error: " + err.message, "bot");
       }
 
@@ -158,6 +225,5 @@
       if (e.key === "Enter") sendMessage();
     });
   </script>
-
 </body>
 </html>
