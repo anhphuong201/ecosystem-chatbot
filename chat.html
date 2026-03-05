@@ -155,11 +155,9 @@
         console.log("Province filter:", provinceFilter);
 
         results = (results || []).filter(r =>
-          provinceFilter.includes(r.province) */&& (r.similarity || 0) > 0.3
+          provinceFilter.includes(r.province) */&& (r.similarity || 0) > 0.1
         );
 
-        console.log("After province filter:", results);
-        console.log("Similarity scores:", results.map(r => r.similarity));
 
         // Fallback to organizations
         if (results.length === 0) {
@@ -168,7 +166,7 @@
             match_count: 20
           });
           results = (orgResults || []).filter(r =>
-            provinceFilter.includes(r.province) && (r.similarity || 0) > 0.3
+            provinceFilter.includes(r.province) */&& (r.similarity || 0) > 0.1
           );
         }
 
