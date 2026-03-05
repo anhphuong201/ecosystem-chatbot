@@ -87,19 +87,16 @@
   </div>
 
   <script>
-    const SUPABASE_URL = ""; 
-    const SUPABASE_KEY = "";
-    const OPENAI_API_KEY = "";
-
+    const BACKEND_URL = "https://ecosystem-chatbot.onrender.com";
     const ATLANTIC_PROVINCES = ["NS", "NL", "PE", "NB"];
+
+    let SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY, supabaseClient;
 
     function expandProvince(province) {
       if (province === "Atlantic Canada") return [...ATLANTIC_PROVINCES, "Atlantic Canada"];
       if (ATLANTIC_PROVINCES.includes(province)) return [province, "Atlantic Canada"];
       return [province];
     }
-
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const messagesDiv = document.getElementById("messages");
     const input = document.getElementById("user-input");
@@ -154,7 +151,9 @@
           match_count: 20
         });
 
-        results = (results || []).filter(r => provinceFilter.includes(r.province) && (r.similarity || 0) > 0.3);
+        results = (results || []).filter(r =>
+          provinceFilter.includes(r.province) && (r.similarity || 0) > 0.3
+        );
 
         // Fallback to organizations
         if (results.length === 0) {
@@ -162,7 +161,9 @@
             query_embedding: embedding,
             match_count: 20
           });
-          results = (orgResults || []).filter(r => provinceFilter.includes(r.province) && (r.similarity || 0) > 0.3);
+          results = (orgResults || []).filter(r =>
+            provinceFilter.includes(r.province) && (r.similarity || 0) > 0.3
+          );
         }
 
         if (results.length === 0) {
@@ -194,7 +195,7 @@ Link: ${r.program_link || r.org_link || "N/A"}
             messages: [
               {
                 role: "system",
-                content: "You are a helpful ecosystem assistant for Canadian innovation programs and organizations. Be specific, reference program names, include links, and keep answers concise and friendly."
+                content: "You are a helpful ecosystem assistant for Atlantic Canada innovation programs and organizations. Be specific, reference program names, include links, and keep answers concise and friendly."
               },
               {
                 role: "user",
@@ -220,10 +221,30 @@ Link: ${r.program_link || r.org_link || "N/A"}
       input.focus();
     }
 
+    // Load config from backend first, then enable chat
+    async function init() {
+      try {
+        const res = await fetch(`${BACKEND_URL}/config`);
+        const config = await res.json();
+        SUPABASE_URL = config.supabase_url;
+        SUPABASE_KEY = config.supabase_key;
+        OPENAI_API_KEY = config.openai_key;
+        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        btn.disabled = false;
+      } catch (err) {
+        addMessage("Failed to load configuration. Please refresh the page.", "bot");
+        console.error(err);
+      }
+    }
+
+    // Disable button until config is loaded
+    btn.disabled = true;
     btn.addEventListener("click", sendMessage);
     input.addEventListener("keydown", e => {
       if (e.key === "Enter") sendMessage();
     });
+
+    init();
   </script>
 </body>
 </html>
