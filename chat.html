@@ -155,7 +155,7 @@
         console.log("Province filter:", provinceFilter);
 
         results = (results || []).filter(r =>
-          provinceFilter.includes(r.province) */&& (r.similarity || 0) > 0.1
+          provinceFilter.includes(r.province) && (r.similarity || 0) > 0.1
         );
 
 
@@ -166,7 +166,7 @@
             match_count: 20
           });
           results = (orgResults || []).filter(r =>
-            provinceFilter.includes(r.province) */&& (r.similarity || 0) > 0.1
+            provinceFilter.includes(r.province) && (r.similarity || 0) > 0.1
           );
         }
 
