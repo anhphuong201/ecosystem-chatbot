@@ -21,6 +21,14 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
+@app.get("/config")
+def get_config():
+    return {
+        "supabase_url": os.environ.get("SUPABASE_URL"),
+        "supabase_key": os.environ.get("SUPABASE_KEY"),
+        "openai_key": os.environ.get("OPENAI_API_KEY")
+    }
+
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -113,3 +121,4 @@ When answering:
     except Exception as e:
         print(f"ERROR: {str(e)}")
         return {"answer": f"Backend error: {str(e)}"}
+
