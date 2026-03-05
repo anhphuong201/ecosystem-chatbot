@@ -70,7 +70,7 @@ def query_bot(q: Query):
         if province_filter:
             result = [row for row in result if row.get("province") in province_filter]
 
-        result = [row for row in result if row.get("similarity", 0) > 0.3]
+        result = [row for row in result if row.get("similarity", 0) > 0.1]
 
         if not result:
             result = supabase.rpc("match_organization", {
@@ -79,7 +79,7 @@ def query_bot(q: Query):
             }).execute().data or []
             if province_filter:
                 result = [row for row in result if row.get("province") in province_filter]
-            result = [row for row in result if row.get("similarity", 0) > 0.3]
+            result = [row for row in result if row.get("similarity", 0) > 0.1]
 
         if not result:
             return {"answer": "I couldn't find any relevant programs or organizations matching your question. Try rephrasing or selecting a different province."}
@@ -121,4 +121,5 @@ When answering:
     except Exception as e:
         print(f"ERROR: {str(e)}")
         return {"answer": f"Backend error: {str(e)}"}
+
 
