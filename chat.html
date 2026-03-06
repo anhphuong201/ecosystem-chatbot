@@ -154,10 +154,12 @@
         console.log("Embedding generated, length:", embedding ? embedding.length : 0);
 
         console.log("Calling match_program...");
-        let { data: results, error: programError } = await supabaseClient.rpc("match_program", {
+        let { data: results, error } = await supabaseClient.rpc("match_program", {
           query_embedding: embedding,
           match_count: 20
         });
+
+console.log("Program error:", error);
 
         console.log("Raw results count:", results ? results.length : 0);
         console.log("First 3 results:", results ? results.slice(0,3) : []);
