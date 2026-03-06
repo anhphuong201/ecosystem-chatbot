@@ -151,8 +151,18 @@
           match_count: 20
         });
 
-        console.log("Raw program results:", results);
+        console.log("Program error:", programError);
+        console.log("Raw results count:", results ? results.length : 0);
+        console.log("First 3 results:", results ? results.slice(0,3) : []);
         console.log("Province filter:", provinceFilter);
+
+        if (results && results.length > 0) {
+          console.log("Sample similarities:", results.slice(0,5).map(r => ({
+            program: r.program,
+            province: r.province,
+            similarity: r.similarity
+          })));
+        }
 
         // Temporarily remove ALL filters to test
         console.log("All similarities:", (results || []).map(r => ({ 
