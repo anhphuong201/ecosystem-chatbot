@@ -154,9 +154,18 @@
         console.log("Raw program results:", results);
         console.log("Province filter:", provinceFilter);
 
+        // Temporarily remove ALL filters to test
+        console.log("All similarities:", (results || []).map(r => ({ 
+          program: r.program, 
+          province: r.province, 
+          similarity: r.similarity 
+        })));
+
         results = (results || []).filter(r =>
           provinceFilter.includes(r.province) && (r.similarity || 0) > 0.1
         );
+
+        console.log("After filter:", results);
 
 
         // Fallback to organizations
