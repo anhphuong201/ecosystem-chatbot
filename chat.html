@@ -27,12 +27,23 @@
     .message {
       padding: 10px 14px;
       border-radius: 18px;
-      max-width: 80%;
-      line-height: 1.4;
+      max-width: 95%;
+      line-height: 1.6;
       font-size: 14px;
     }
-    .user { background: #0070f3; color: white; align-self: flex-end; }
+    .user { background: #0070f3; color: white; align-self: flex-end; max-width: 80%; }
     .bot { background: #e9e9e9; color: #333; align-self: flex-start; }
+    .result {
+      background: #f8f9fa;
+      border-left: 3px solid #0070f3;
+      padding: 10px 12px;
+      margin: 6px 0;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .result a { color: #0070f3; text-decoration: none; }
+    .result a:hover { text-decoration: underline; }
     #input-area {
       display: flex;
       padding: 12px;
@@ -118,10 +129,7 @@
           "Content-Type": "application/json",
           "Authorization": `Bearer ${OPENAI_API_KEY}`
         },
-        body: JSON.stringify({
-          model: "text-embedding-3-small",
-          input: text
-        })
+        body: JSON.stringify({ model: "text-embedding-3-small", input: text })
       });
       const data = await res.json();
       return data.data[0].embedding;
@@ -130,11 +138,6 @@
     async function sendMessage() {
       const question = input.value.trim();
       if (!question) return;
-
-      console.log("=== sendMessage started ===");
-      console.log("SUPABASE_URL:", SUPABASE_URL);
-      console.log("OPENAI_API_KEY exists:", !!OPENAI_API_KEY);
-      console.log("supabaseClient:", !!supabaseClient);
 
       addMessage(question, "user");
       input.value = "";
@@ -149,54 +152,68 @@
         const province = provinceSelect.value;
         const provinceFilter = expandProvince(province);
 
-        console.log("Generating embedding...");
-        const embedding = await generateEmbedding(question);
-        console.log("Embedding generated, length:", embedding ? embedding.length : 0);
+        // Detect intent
+        const q = question.toLowerCase();
+        const researchKeywords = ["research", "lab", "laboratory", "facility", "centre", "center", "institute"];
+        const fundingKeywords = ["funding", "grant", "money", "investment", "capital", "finance"];
+        const cleanTechKeywords = ["clean tech", "cleantech", "clean energy", "renewable", "environment"];
+        const isResearch = researchKeywords.some(k => q.includes(k));
+        const isFunding = fundingKeywords.some(k => q.includes(k));
+        const isCleanTech = cleanTechKeywords.some(k => q.includes(k));
 
-        console.log("Calling match_program...");
+        const embedding = await generateEmbedding(question);
+
         let { data: results, error } = await supabaseClient.rpc("match_program", {
           query_embedding: embedding,
-          match_count: 20
+          match_count: 30
         });
 
-console.log("Program error:", error);
-
-        console.log("Raw results count:", results ? results.length : 0);
-        console.log("First 3 results:", results ? results.slice(0,3) : []);
-        console.log("Province filter:", provinceFilter);
-
-        if (results && results.length > 0) {
-          console.log("Sample similarities:", results.slice(0,5).map(r => ({
-            program: r.program,
-            province: r.province,
-            similarity: r.similarity
-          })));
-        }
-
-        // Temporarily remove ALL filters to test
-        console.log("All similarities:", (results || []).map(r => ({ 
-          program: r.program, 
-          province: r.province, 
-          similarity: r.similarity 
-        })));
+        console.log("Raw results:", results ? results.length : 0, "Error:", error);
 
         results = (results || []).filter(r =>
           provinceFilter.includes(r.province) && (r.similarity || 0) > 0.1
         );
 
-        console.log("After filter:", results);
+        // Apply intent filters
+        if (isResearch) {
+          const researchEcosystems = ["postsecondary research", "research", "university", "college"];
+          results = results.filter(r =>
+            researchEcosystems.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
+            researchKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
+            researchKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
+          );
+        }
 
+        if (isCleanTech) {
+          results = results.filter(r =>
+            (r.industry || "").toLowerCase().includes("clean") ||
+            (r.industry || "").toLowerCase().includes("energy") ||
+            (r.industry || "").toLowerCase().includes("environment") ||
+            (r.program_description || "").toLowerCase().includes("clean")
+          );
+        }
+
+        if (isFunding) {
+          results = results.filter(r =>
+            (r.ecosystem || "").toLowerCase().includes("fund") ||
+            (r.program || "").toLowerCase().includes("fund") ||
+            (r.program || "").toLowerCase().includes("grant") ||
+            (r.program_description || "").toLowerCase().includes("fund")
+          );
+        }
 
         // Fallback to organizations
         if (results.length === 0) {
           let { data: orgResults } = await supabaseClient.rpc("match_organization", {
             query_embedding: embedding,
-            match_count: 20
+            match_count: 30
           });
           results = (orgResults || []).filter(r =>
             provinceFilter.includes(r.province) && (r.similarity || 0) > 0.1
           );
         }
+
+        results = results.slice(0, 10);
 
         if (results.length === 0) {
           messagesDiv.removeChild(typing);
@@ -206,16 +223,18 @@ console.log("Program error:", error);
           return;
         }
 
-        // Build context
         const context = results.map(r => `
 Program: ${r.program || "N/A"}
-Description: ${r.program_description || r.org_description || "N/A"}
+Program Description: ${r.program_description || "N/A"}
 Organization: ${r.organization_name || "N/A"}
+Organization Description: ${r.org_description || "N/A"}
+Ecosystem: ${r.ecosystem || "N/A"}
+Industry: ${r.industry || "N/A"}
 Province: ${r.province || "N/A"}
-Link: ${r.program_link || r.org_link || "N/A"}
+Program Link: ${r.program_link || "N/A"}
+Org Link: ${r.org_link || "N/A"}
 ---`).join("\n");
 
-        // Ask GPT
         const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -227,7 +246,28 @@ Link: ${r.program_link || r.org_link || "N/A"}
             messages: [
               {
                 role: "system",
-                content: "You are a helpful ecosystem assistant for Atlantic Canada innovation programs and organizations. Be specific, reference program names, include links, and keep answers concise and friendly."
+                content: `You are a helpful assistant for the Atlantic Canada innovation ecosystem.
+You help researchers, entrepreneurs, startups, and students find relevant programs, labs, funding, and organizations.
+
+IMPORTANT RULES:
+- "research lab" or "lab" means physical research facilities at universities or institutions. Do NOT include incubators, accelerators, coding bootcamps, or startup programs unless specifically asked.
+- "funding" or "grant" means financial programs only.
+- "startup" or "entrepreneur" means incubators, accelerators, pitch competitions.
+- Always match the INTENT of the question, not just keywords in the name.
+- Only include results that are genuinely relevant to the question.
+
+FORMAT your response exactly like this for each result:
+<div class="result">
+<strong>[Program/Lab Name]</strong><br>
+🏛️ <em>[Organization Name]</em><br>
+📍 [Province]<br>
+📝 [One sentence description]<br>
+🔗 <a href="[link]" target="_blank">Learn more</a>
+</div>
+
+- Show up to 10 results
+- End with: <br><em>Would you like more details about any of these?</em>
+- Province context: ${province}`
               },
               {
                 role: "user",
@@ -245,7 +285,7 @@ Link: ${r.program_link || r.org_link || "N/A"}
 
       } catch (err) {
         messagesDiv.removeChild(typing);
-        console.error(err);
+        console.error("Error:", err);
         addMessage("Error: " + err.message, "bot");
       }
 
@@ -253,23 +293,29 @@ Link: ${r.program_link || r.org_link || "N/A"}
       input.focus();
     }
 
-    // Load config from backend first, then enable chat
     async function init() {
-      try {
-        const res = await fetch(`${BACKEND_URL}/config`);
-        const config = await res.json();
-        SUPABASE_URL = config.supabase_url;
-        SUPABASE_KEY = config.supabase_key;
-        OPENAI_API_KEY = config.openai_key;
-        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-        btn.disabled = false;
-      } catch (err) {
-        addMessage("Failed to load configuration. Please refresh the page.", "bot");
-        console.error(err);
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          const res = await fetch(`${BACKEND_URL}/config`);
+          if (!res.ok) throw new Error(`Status ${res.status}`);
+          const config = await res.json();
+          SUPABASE_URL = config.supabase_url;
+          SUPABASE_KEY = config.supabase_key;
+          OPENAI_API_KEY = config.openai_key;
+          supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+          btn.disabled = false;
+          console.log("Config loaded successfully");
+          return;
+        } catch (err) {
+          retries--;
+          console.error(`Config load failed, retries left: ${retries}`, err);
+          if (retries > 0) await new Promise(r => setTimeout(r, 2000));
+        }
       }
+      addMessage("Failed to load configuration. Please refresh the page.", "bot");
     }
 
-    // Disable button until config is loaded
     btn.disabled = true;
     btn.addEventListener("click", sendMessage);
     input.addEventListener("keydown", e => {
