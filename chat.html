@@ -131,6 +131,11 @@
       const question = input.value.trim();
       if (!question) return;
 
+      console.log("=== sendMessage started ===");
+      console.log("SUPABASE_URL:", SUPABASE_URL);
+      console.log("OPENAI_API_KEY exists:", !!OPENAI_API_KEY);
+      console.log("supabaseClient:", !!supabaseClient);
+
       addMessage(question, "user");
       input.value = "";
       btn.disabled = true;
@@ -143,10 +148,13 @@
       try {
         const province = provinceSelect.value;
         const provinceFilter = expandProvince(province);
-        const embedding = await generateEmbedding(question);
 
-        // Search programs
-        let { data: results } = await supabaseClient.rpc("match_program", {
+        console.log("Generating embedding...");
+        const embedding = await generateEmbedding(question);
+        console.log("Embedding generated, length:", embedding ? embedding.length : 0);
+
+        console.log("Calling match_program...");
+        let { data: results, error: programError } = await supabaseClient.rpc("match_program", {
           query_embedding: embedding,
           match_count: 20
         });
