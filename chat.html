@@ -103,10 +103,10 @@
     const btn = document.getElementById("send-btn");
     const provinceSelect = document.getElementById("province-select");
 
-    function addMessage(text, sender) {
+    function addMessage(html, sender) {
       const div = document.createElement("div");
       div.className = `message ${sender}`;
-      div.textContent = text;
+      div.innerHTML = html;
       messagesDiv.appendChild(div);
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
