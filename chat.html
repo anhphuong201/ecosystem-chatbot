@@ -103,7 +103,7 @@
     const ATLANTIC_PROVINCES = ["NS", "NL", "PE", "NB"];
 
     let SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY, supabaseClient;
-    let lastResults = []; // stores full filtered list for export
+    let lastResults = [];
 
     function expandProvince(province) {
       if (province === "Atlantic Canada") return [...ATLANTIC_PROVINCES, "Atlantic Canada"];
@@ -142,65 +142,32 @@
         addMessage("There are no results to export yet. Please ask a question first.", "bot");
         return;
       }
-    
+
       // Sort by organization name for grouping
-      const sorted = [...lastResults].sort((a, b) => 
+      const sorted = [...lastResults].sort((a, b) =>
         (a.organization_name || "").localeCompare(b.organization_name || "")
       );
-    
+
       const exportData = sorted.map(r => ({
         "Organization": r.organization_name || "",
         "Program": r.program || "",
         "Program Description": r.program_description || "",
         "Link": r.program_link || r.org_link || ""
       }));
-    
+
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Results");
-    
+
       // Auto-width columns
       const colWidths = Object.keys(exportData[0]).map(key => ({
         wch: Math.max(key.length + 2, ...exportData.map(r => (r[key] || "").toString().length))
       }));
       ws["!cols"] = colWidths;
-    
-      // Bold header row
-      const range = XLSX.utils.decode_range(ws["!ref"]);
-      for (let col = range.s.c; col <= range.e.c; col++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: 0, c: col })];
-        if (cell) cell.s = { font: { bold: true } };
-      }
-    
+
       const filename = `ecosystem_results_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(wb, filename);
       addMessage(`📥 Downloading <strong>${exportData.length} results</strong> grouped by organization to <em>${filename}</em>`, "bot");
-    }
-
-      const exportData = lastResults.map(r => ({
-        "Program": r.program || "",
-        "Program Description": r.program_description || "",
-        "Organization": r.organization_name || "",
-        "Organization Description": r.org_description || "",
-        "Ecosystem": r.ecosystem || "",
-        "Industry": r.industry || "",
-        "Province": r.province || "",
-        "Program Link": r.program_link || "",
-        "Organization Link": r.org_link || ""
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Results");
-
-      const colWidths = Object.keys(exportData[0]).map(key => ({
-        wch: Math.max(key.length, ...exportData.map(r => (r[key] || "").toString().length))
-      }));
-      ws["!cols"] = colWidths;
-
-      const filename = `ecosystem_results_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      XLSX.writeFile(wb, filename);
-      addMessage(`📥 Downloading <strong>${exportData.length} results</strong> to <em>${filename}</em>`, "bot");
     }
 
     async function sendMessage() {
@@ -220,7 +187,6 @@
         const province = provinceSelect.value;
         const provinceFilter = expandProvince(province);
 
-        // Detect intent
         const q = question.toLowerCase();
         const researchKeywords = ["research", "lab", "laboratory", "facility", "centre", "center", "institute"];
         const fundingKeywords = ["funding", "grant", "money", "investment", "capital", "finance", "loan", "financial support"];
@@ -234,7 +200,6 @@
         const isCleanTech = cleanTechKeywords.some(k => q.includes(k));
         const isExport = exportKeywords.some(k => q.includes(k));
 
-        // Handle export request
         if (isExport) {
           messagesDiv.removeChild(typing);
           exportToExcel();
@@ -252,15 +217,12 @@
 
         console.log("Raw results:", results ? results.length : 0, "Error:", error);
 
-        // Filter by province and similarity
         results = (results || []).filter(r =>
           provinceFilter.includes(r.province) && (r.similarity || 0) > 0.2
         );
 
-        // Sort by similarity, best first
         results = results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
 
-        // Apply intent filters
         if (isResearch) {
           const researchEcosystems = ["postsecondary research", "research", "university", "college"];
           results = results.filter(r =>
@@ -297,7 +259,6 @@
           );
         }
 
-        // Fallback to organizations
         if (results.length === 0) {
           let { data: orgResults } = await supabaseClient.rpc("match_organization", {
             query_embedding: embedding,
@@ -368,7 +329,7 @@ FORMAT your response exactly like this for each result:
 </div>
 
 - Show up to 10 results
-- End with: <br><em>Found ${results.length} results total. Do you want to explore more? Or Type "export to excel" to download the full list.</em>
+- End with: <br><em>Found ${results.length} results total. Type "export to excel" to download the full list.</em>
 - Province context: ${province}`
               },
               {
