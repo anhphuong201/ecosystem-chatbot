@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Ecosystem Chatbot</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; background: #f5f5f5; }
@@ -86,11 +87,11 @@
     </div>
     <div id="input-area">
       <select id="province-select">
+        <option value="Atlantic Canada">Atlantic Canada</option>
         <option value="NS">Nova Scotia</option>
         <option value="NL">Newfoundland</option>
         <option value="PE">PEI</option>
         <option value="NB">New Brunswick</option>
-        <option value="Atlantic Canada">Atlantic Canada</option>
       </select>
       <input id="user-input" type="text" placeholder="Ask a question..." />
       <button id="send-btn">Send</button>
@@ -135,6 +136,40 @@
       return data.data[0].embedding;
     }
 
+        function exportToExcel() {
+      if (!lastResults.length) {
+        addMessage("There are no results to export yet. Please ask a question first.", "bot");
+        return;
+      }
+
+      const exportData = lastResults.map(r => ({
+        "Program": r.program || "",
+        "Program Description": r.program_description || "",
+        "Organization": r.organization_name || "",
+        "Organization Description": r.org_description || "",
+        "Ecosystem": r.ecosystem || "",
+        "Industry": r.industry || "",
+        "Province": r.province || "",
+        "Program Link": r.program_link || "",
+        "Organization Link": r.org_link || ""
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Results");
+
+      // Auto-width columns
+      const colWidths = Object.keys(exportData[0]).map(key => ({
+        wch: Math.max(key.length, ...exportData.map(r => (r[key] || "").toString().length))
+      }));
+      ws["!cols"] = colWidths;
+
+      const filename = `ecosystem_results_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+
+      addMessage(`📥 Downloading <strong>${exportData.length} results</strong> to <em>${filename}</em>`, "bot");
+    }
+
     async function sendMessage() {
       const question = input.value.trim();
       if (!question) return;
@@ -155,12 +190,23 @@
         // Detect intent
         const q = question.toLowerCase();
         const researchKeywords = ["research", "lab", "laboratory", "facility", "centre", "center", "institute"];
-        const fundingKeywords = ["funding", "grant", "money", "investment", "capital", "finance"];
+        const fundingKeywords = ["funding", "grant", "money", "investment", "capital", "finance", "loan", "financial support"];
+        const entrepreneurKeywords = ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"];
         const cleanTechKeywords = ["clean tech", "cleantech", "clean energy", "renewable", "environment"];
         const isResearch = researchKeywords.some(k => q.includes(k));
         const isFunding = fundingKeywords.some(k => q.includes(k));
+        const isEntrepreneur = entrepreneurKeywords.some(k => q.includes(k));
         const isCleanTech = cleanTechKeywords.some(k => q.includes(k));
 
+        // Handle export request
+        if (isExport) {
+          messagesDiv.removeChild(typing);
+          exportToExcel();
+          btn.disabled = false;
+          input.focus();
+          return;
+        }
+        
         const embedding = await generateEmbedding(question);
 
         let { data: results, error } = await supabaseClient.rpc("match_program", {
@@ -171,14 +217,24 @@
         console.log("Raw results:", results ? results.length : 0, "Error:", error);
 
         results = (results || []).filter(r =>
-          provinceFilter.includes(r.province) && (r.similarity || 0) > 0.1
+          provinceFilter.includes(r.province) && (r.similarity || 0) > 0.2
         );
+        results = results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
 
         // Apply intent filters
         if (isResearch) {
-          const researchEcosystems = ["postsecondary research", "research", "university", "college"];
+          const researchEcosystems = ["research labs", "research", "university", "college"];
           results = results.filter(r =>
             researchEcosystems.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
+            entrepreneurKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
+            entrepreneurKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
+          );
+        }
+
+        if (isEntrepreneur) {
+          const entrepreneurEcosystems = ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator", "accelerator];
+          results = results.filter(r =>
+            entrepreneurEcosystems.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
             researchKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
             researchKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
           );
@@ -222,7 +278,13 @@
           input.focus();
           return;
         }
+        
+        // Save FULL list for export BEFORE slicing
+        lastResults = results;
 
+        // Only show top 10 in chat
+        const displayResults = results.slice(0, 10);
+        
         const context = results.map(r => `
 Program: ${r.program || "N/A"}
 Program Description: ${r.program_description || "N/A"}
@@ -252,9 +314,11 @@ You help researchers, entrepreneurs, startups, and students find relevant progra
 IMPORTANT RULES:
 - "research lab" or "lab" means physical research facilities at universities or institutions. Do NOT include incubators, accelerators, coding bootcamps, or startup programs unless specifically asked.
 - "funding" or "grant" means financial programs only.
-- "startup" or "entrepreneur" means incubators, accelerators, pitch competitions.
+- "startup" or "entrepreneur" or "spinoff" means incubators, accelerators, pitch competitions.
 - Always match the INTENT of the question, not just keywords in the name.
 - Only include results that are genuinely relevant to the question.
+- If a result does not clearly relate to the user's question, do NOT include it in your response even if it appears in the data.
+- Always sort results by relevance to the question, most relevant first.
 
 FORMAT your response exactly like this for each result:
 <div class="result">
@@ -266,7 +330,7 @@ FORMAT your response exactly like this for each result:
 </div>
 
 - Show up to 10 results
-- End with: <br><em>Would you like more details about any of these?</em>
+- End with: <br><em> Do you want to view more? Or type "export to excel" to download the full list.</em>
 - Province context: ${province}`
               },
               {
