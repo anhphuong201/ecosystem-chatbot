@@ -151,8 +151,8 @@
       const exportData = sorted.map(r => ({
         "Organization": r.organization_name || "",
         "Program": r.program || "",
-        "Program Description": r.program_description || "",
-        "Link": r.program_link || r.org_link || ""
+        "Link": r.program_link || r.org_link || "",
+        "Program Description": r.program_description || ""
       }));
 
       const ws = XLSX.utils.json_to_sheet(exportData);
@@ -203,29 +203,30 @@
         // Detect industry from question
         const industryKeywords = {
           "Agriculture": ["agriculture", "agri", "farm", "crop", "farming"],
-          "Agrifood": ["agrifood", "food", "agri-food", "nutrition", "feed"],
+          "Agrifood": ["agrifood", "food", "agri-food", "nutrition", "beverage", "brewery"],
           "Biotechnology": ["biotech", "biotechnology", "biology", "genomics", "bioscience"],
-          "Climate & Environment": ["climate", "environment", "environmental", "sustainability", "ecological"],
+          "Climate & Environment": ["climate", "environment", "environmental", "sustainability", "ecological", "clean energy"],
+          "Biology": ["biology", "ecological", "biodiversity", "bioresource", "habitat"],
           "Education": ["education", "learning", "training", "academic", "teaching"],
           "Health & Wellness": ["health", "wellness", "medical", "biomedical", "clinical", "healthcare"],
           "History": ["history", "historical", "heritage", "archive"],
-          "Culture": ["culture", "cultural", "arts"],
+          "Culture": ["culture", "cultural", "arts", "music"],
           "Society": ["society", "social", "community", "public policy"],
           "AI & Data Analytics": ["ai", "artificial intelligence", "data analytics", "machine learning", "data science"],
-          "Ocean": ["ocean", "marine", "coastal", "underwater", "sea", "maritime", "offshore"],
-          "Engineering": ["engineering", "engineer", "mechanical", "structural", "civil"],
-          "Energy": ["energy", "power", "electricity", "solar", "wind"],
+          "Ocean": ["ocean", "marine", "coastal", "underwater", "sea", "maritime"],
+          "Engineering": ["engineering", "engineer", "mechanical", "structural", "civil", "electrical", "chemical"],
+          "Energy": ["energy", "power", "electricity", "solar", "wind", "renewable energy", "clean tech", "grid"],
           "Geomatics": ["geomatics", "gis", "geospatial", "mapping", "remote sensing"],
-          "ICT": ["ict", "information technology", "software", "digital", "cyber", "computing"],
+          "ICT": ["ict", "information technology", "software", "digital", "cyber", "computing", "robotics"],
           "Transportation": ["transportation", "transport", "logistics", "mobility"],
-          "Oil & Gas": ["oil", "gas", "petroleum", "natural gas", "fossil fuel"],
+          "Oil & Gas": ["oil", "gas", "petroleum", "natural gas", "fossil fuel", "offshore"],
           "Mining": ["mining", "mineral", "extraction", "ore"],
           "Advanced Materials & Manufacturing": ["advanced materials", "manufacturing", "materials", "composites", "3d printing"],
           "Nutrition": ["nutrition", "nutritional", "diet", "food science", "nutraceutical"],
           "Chemistry": ["chemistry", "chemical", "biochemistry", "molecular"],
           "Business": ["business", "commerce", "enterprise", "sme"],
           "Geology": ["geology", "geological", "geoscience", "rock", "sediment"],
-          "Aquaculture": ["aquaculture", "fish farming", "shellfish", "salmon", "seafood"],
+          "Aquaculture": ["aquaculture", "fish farming", "shellfish", "salmon", "seafood", "fisheries", "lobster"],
           "Defense & Aerospace": ["defense", "defence", "aerospace", "aviation", "space", "military", "navy"],
           "Forestry": ["forestry", "forest", "wood", "lumber", "timber", "pulp"]
         };
