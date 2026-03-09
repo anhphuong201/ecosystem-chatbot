@@ -103,6 +103,7 @@
     const ATLANTIC_PROVINCES = ["NS", "NL", "PE", "NB"];
 
     let SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY, supabaseClient;
+    let lastResults = []; // stores full filtered list for export
 
     function expandProvince(province) {
       if (province === "Atlantic Canada") return [...ATLANTIC_PROVINCES, "Atlantic Canada"];
@@ -136,7 +137,7 @@
       return data.data[0].embedding;
     }
 
-        function exportToExcel() {
+    function exportToExcel() {
       if (!lastResults.length) {
         addMessage("There are no results to export yet. Please ask a question first.", "bot");
         return;
@@ -158,7 +159,6 @@
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Results");
 
-      // Auto-width columns
       const colWidths = Object.keys(exportData[0]).map(key => ({
         wch: Math.max(key.length, ...exportData.map(r => (r[key] || "").toString().length))
       }));
@@ -166,7 +166,6 @@
 
       const filename = `ecosystem_results_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(wb, filename);
-
       addMessage(`📥 Downloading <strong>${exportData.length} results</strong> to <em>${filename}</em>`, "bot");
     }
 
@@ -193,10 +192,13 @@
         const fundingKeywords = ["funding", "grant", "money", "investment", "capital", "finance", "loan", "financial support"];
         const entrepreneurKeywords = ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"];
         const cleanTechKeywords = ["clean tech", "cleantech", "clean energy", "renewable", "environment"];
+        const exportKeywords = ["export", "download", "excel", "spreadsheet", "list"];
+
         const isResearch = researchKeywords.some(k => q.includes(k));
         const isFunding = fundingKeywords.some(k => q.includes(k));
         const isEntrepreneur = entrepreneurKeywords.some(k => q.includes(k));
         const isCleanTech = cleanTechKeywords.some(k => q.includes(k));
+        const isExport = exportKeywords.some(k => q.includes(k));
 
         // Handle export request
         if (isExport) {
@@ -206,37 +208,40 @@
           input.focus();
           return;
         }
-        
+
         const embedding = await generateEmbedding(question);
 
         let { data: results, error } = await supabaseClient.rpc("match_program", {
           query_embedding: embedding,
-          match_count: 30
+          match_count: 50
         });
 
         console.log("Raw results:", results ? results.length : 0, "Error:", error);
 
+        // Filter by province and similarity
         results = (results || []).filter(r =>
           provinceFilter.includes(r.province) && (r.similarity || 0) > 0.2
         );
+
+        // Sort by similarity, best first
         results = results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
 
         // Apply intent filters
         if (isResearch) {
-          const researchEcosystems = ["research labs", "research", "university", "college"];
+          const researchEcosystems = ["postsecondary research", "research", "university", "college"];
           results = results.filter(r =>
             researchEcosystems.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
-            entrepreneurKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
-            entrepreneurKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
+            researchKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
+            researchKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
           );
         }
 
         if (isEntrepreneur) {
-          const entrepreneurEcosystems = ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator", "accelerator];
+          const entrepreneurEcosystems = ["entrepreneur", "entrepreneurship", "startup", "start-up", "spin-off", "incubator", "accelerator"];
           results = results.filter(r =>
             entrepreneurEcosystems.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
-            researchKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
-            researchKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
+            entrepreneurKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
+            entrepreneurKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
           );
         }
 
@@ -262,14 +267,13 @@
         if (results.length === 0) {
           let { data: orgResults } = await supabaseClient.rpc("match_organization", {
             query_embedding: embedding,
-            match_count: 30
+            match_count: 50
           });
           results = (orgResults || []).filter(r =>
-            provinceFilter.includes(r.province) && (r.similarity || 0) > 0.1
+            provinceFilter.includes(r.province) && (r.similarity || 0) > 0.2
           );
+          results = results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
         }
-
-        results = results.slice(0, 10);
 
         if (results.length === 0) {
           messagesDiv.removeChild(typing);
@@ -278,14 +282,14 @@
           input.focus();
           return;
         }
-        
+
         // Save FULL list for export BEFORE slicing
         lastResults = results;
 
         // Only show top 10 in chat
         const displayResults = results.slice(0, 10);
-        
-        const context = results.map(r => `
+
+        const context = displayResults.map(r => `
 Program: ${r.program || "N/A"}
 Program Description: ${r.program_description || "N/A"}
 Organization: ${r.organization_name || "N/A"}
@@ -330,7 +334,7 @@ FORMAT your response exactly like this for each result:
 </div>
 
 - Show up to 10 results
-- End with: <br><em> Do you want to view more? Or type "export to excel" to download the full list.</em>
+- End with: <br><em>Found ${results.length} results total. Type "export to excel" to download the full list.</em>
 - Province context: ${province}`
               },
               {
