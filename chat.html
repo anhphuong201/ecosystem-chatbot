@@ -193,7 +193,7 @@
         const entrepreneurKeywords = ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"];
         const cleanTechKeywords = ["clean tech", "cleantech", "clean energy", "renewable", "environment"];
         const exportKeywords = ["export", "download", "excel", "spreadsheet", "list"];
-          const industryKeywords = {
+        const industryKeywords = {
           "Agriculture": ["agriculture", "agri", "farm", "crop", "farming"],
           "Agrifood": ["agrifood", "food", "agri-food", "nutrition", "feed"],
           "Biotechnology": ["biotech", "biotechnology", "biology", "genomics", "bioscience"],
@@ -227,6 +227,43 @@
         const isEntrepreneur = entrepreneurKeywords.some(k => q.includes(k));
         const isCleanTech = cleanTechKeywords.some(k => q.includes(k));
         const isExport = exportKeywords.some(k => q.includes(k));
+        
+        // Detect industry from question
+        const industryKeywords = {
+          "Agriculture": ["agriculture", "agri", "farm", "crop", "farming"],
+          "Agrifood": ["agrifood", "food", "agri-food", "nutrition", "feed"],
+          "Biotechnology": ["biotech", "biotechnology", "biology", "genomics", "bioscience"],
+          "Climate & Environment": ["climate", "environment", "environmental", "sustainability", "ecological"],
+          "Education": ["education", "learning", "training", "academic", "teaching"],
+          "Health & Wellness": ["health", "wellness", "medical", "biomedical", "clinical", "healthcare"],
+          "History": ["history", "historical", "heritage", "archive"],
+          "Culture": ["culture", "cultural", "arts"],
+          "Society": ["society", "social", "community", "public policy"],
+          "AI & Data Analytics": ["ai", "artificial intelligence", "data analytics", "machine learning", "data science"],
+          "Ocean": ["ocean", "marine", "coastal", "underwater", "sea", "maritime", "offshore"],
+          "Engineering": ["engineering", "engineer", "mechanical", "structural", "civil"],
+          "Energy": ["energy", "power", "electricity", "solar", "wind"],
+          "Geomatics": ["geomatics", "gis", "geospatial", "mapping", "remote sensing"],
+          "ICT": ["ict", "information technology", "software", "digital", "cyber", "computing"],
+          "Transportation": ["transportation", "transport", "logistics", "mobility"],
+          "Oil & Gas": ["oil", "gas", "petroleum", "natural gas", "fossil fuel"],
+          "Mining": ["mining", "mineral", "extraction", "ore"],
+          "Advanced Materials & Manufacturing": ["advanced materials", "manufacturing", "materials", "composites", "3d printing"],
+          "Nutrition": ["nutrition", "nutritional", "diet", "food science", "nutraceutical"],
+          "Chemistry": ["chemistry", "chemical", "biochemistry", "molecular"],
+          "Business": ["business", "commerce", "enterprise", "sme"],
+          "Geology": ["geology", "geological", "geoscience", "rock", "sediment"],
+          "Aquaculture": ["aquaculture", "fish farming", "shellfish", "salmon", "seafood"],
+          "Defense & Aerospace": ["defense", "defence", "aerospace", "aviation", "space", "military", "navy"],
+          "Forestry": ["forestry", "forest", "wood", "lumber", "timber", "pulp"]
+        };
+        
+        // Returns empty array if no industry detected - filter will be skipped
+        const detectedIndustries = Object.keys(industryKeywords).filter(ind =>
+          industryKeywords[ind].some(k => q.includes(k))
+        );
+        
+        console.log("Detected industries:", detectedIndustries);
     
 
         if (isExport) {
