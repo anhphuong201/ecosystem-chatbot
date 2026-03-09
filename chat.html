@@ -205,7 +205,7 @@
           "Agriculture": ["agriculture", "agri", "farm", "crop", "farming"],
           "Agrifood": ["agrifood", "food", "agri-food", "nutrition", "beverage", "brewery"],
           "Biotechnology": ["biotech", "biotechnology", "biology", "genomics", "bioscience"],
-          "Climate & Environment": ["climate", "environment", "environmental", "sustainability", "ecological", "clean energy"],
+          "Climate & Environment": ["climate", "environment", "environmental", "sustainability", "ecological", "clean energy", "clean tech"],
           "Biology": ["biology", "ecological", "biodiversity", "bioresource", "habitat"],
           "Education": ["education", "learning", "training", "academic", "teaching"],
           "Health & Wellness": ["health", "wellness", "medical", "biomedical", "clinical", "healthcare"],
@@ -379,9 +379,9 @@ Org Link: ${r.org_link || "N/A"}
 You help researchers, entrepreneurs, startups, and students find relevant programs, labs, funding, and organizations.
 
 IMPORTANT RULES:
-- "research lab" or "lab" means physical research facilities at universities or institutions. Do NOT include incubators, accelerators, coding bootcamps, or startup programs unless specifically asked.
+- "research lab" or "lab" means physical research facilities at universities or institutions. Do NOT include incubators, accelerators, or startup programs unless specifically asked.
 - "funding" or "grant" means financial programs only.
-- "startup" or "entrepreneur" or "spinoff" means incubators, accelerators, pitch competitions.
+- "startup" or "entrepreneur" or "spinoff" means asking about incubators, accelerators, pitch competitions.
 - Always match the INTENT of the question, not just keywords in the name.
 - Only include results that are genuinely relevant to the question.
 - If a result does not clearly relate to the user's question, do NOT include it in your response even if it appears in the data.
@@ -397,7 +397,7 @@ FORMAT your response exactly like this for each result:
 </div>
 
 - Show up to 10 results
-- End with: <br><em>Found ${results.length} results total. Type "export to excel" to download the full list.</em>
+- End with: <br><em>Found ${results.length} results total. Do you want to explore more or type "Export to Excel" to download the full list.</em>
 - Province context: ${province}`
               },
               {
