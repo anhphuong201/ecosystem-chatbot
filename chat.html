@@ -142,6 +142,40 @@
         addMessage("There are no results to export yet. Please ask a question first.", "bot");
         return;
       }
+    
+      // Sort by organization name for grouping
+      const sorted = [...lastResults].sort((a, b) => 
+        (a.organization_name || "").localeCompare(b.organization_name || "")
+      );
+    
+      const exportData = sorted.map(r => ({
+        "Organization": r.organization_name || "",
+        "Program": r.program || "",
+        "Program Description": r.program_description || "",
+        "Link": r.program_link || r.org_link || ""
+      }));
+    
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Results");
+    
+      // Auto-width columns
+      const colWidths = Object.keys(exportData[0]).map(key => ({
+        wch: Math.max(key.length + 2, ...exportData.map(r => (r[key] || "").toString().length))
+      }));
+      ws["!cols"] = colWidths;
+    
+      // Bold header row
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      for (let col = range.s.c; col <= range.e.c; col++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: 0, c: col })];
+        if (cell) cell.s = { font: { bold: true } };
+      }
+    
+      const filename = `ecosystem_results_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+      addMessage(`📥 Downloading <strong>${exportData.length} results</strong> grouped by organization to <em>${filename}</em>`, "bot");
+    }
 
       const exportData = lastResults.map(r => ({
         "Program": r.program || "",
@@ -334,7 +368,7 @@ FORMAT your response exactly like this for each result:
 </div>
 
 - Show up to 10 results
-- End with: <br><em>Found ${results.length} results total. Type "export to excel" to download the full list.</em>
+- End with: <br><em>Found ${results.length} results total. Do you want to explore more? Or Type "export to excel" to download the full list.</em>
 - Province context: ${province}`
               },
               {
