@@ -23,16 +23,17 @@ def generate_embedding(text: str):
 orgs = supabase.table("organization").select("*").execute().data
 
 for org in orgs:
-    if org["embedding"] is not None:
-        continue
-
-    text = f"{org['organization_name']} {org['description']} {org['search_summary']}"
+    text = " ".join(filter(None, [
+        org.get('organization_name', ''),
+        org.get('description', ''),
+        org.get('search_summary', ''),
+        org.get('province', ''),
+        org.get('ecosystem', '')
+    ]))
     embedding = generate_embedding(text)
-
     supabase.table("organization").update({
         "embedding": embedding
     }).eq("code", org["code"]).execute()
-
     print("Updated org:", org["organization_name"])
 
 
@@ -40,16 +41,20 @@ for org in orgs:
 programs = supabase.table("program").select("*").execute().data
 
 for prog in programs:
-    if prog["embedding"] is not None:
-        continue
-
-    text = f"{prog['program']} {prog['description']} {prog['search_summary']} {prog['organization_name']}"
+    text = " ".join(filter(None, [
+        prog.get('program', ''),
+        prog.get('description', ''),
+        prog.get('search_summary', ''),
+        prog.get('organization_name', ''),
+        prog.get('industry', ''),
+        prog.get('research_cluster', ''),
+        prog.get('province', ''),
+        prog.get('ecosystem', '')
+    ]))
     embedding = generate_embedding(text)
-
     supabase.table("program").update({
         "embedding": embedding
     }).eq("id", prog["id"]).execute()
-
     print("Updated program:", prog["program"])
 
 print("Done.")
