@@ -348,7 +348,7 @@
     const KEYWORD_SETS = {
       research:     ["research", "lab", "laboratory", "facility", "centre", "center", "institute"],
       funding:      ["funding", "grant", "money", "investment", "capital", "finance", "loan", "financial support"],
-      entrepreneur: ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"],
+      entrepreneur: ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"]
     };
 
     const INDUSTRY_KEYWORDS = {
@@ -460,37 +460,10 @@
     // ─────────────────────────────────────────────
     // Intent detection
     // ─────────────────────────────────────────────
-    // Known institution name fragments to detect in the query
-    const KNOWN_ORGS = [
-      "memorial university", "memorial", "mun",
-      "dalhousie", "dal",
-      "acadia university", "acadia",
-      "saint mary", "smu",
-      "cape breton university", "cbu",
-      "university of new brunswick", "unb",
-      "mount allison", "mount allison university",
-      "st. francis xavier", "stfx",
-      "university of prince edward island", "upei",
-      "nscad", "nova scotia college of art",
-      "genesis centre", "genesis center",
-      "innovacorp", "volta", "entrevestor",
-      "nrc", "national research council",
-      "oceans advance", "cove",
-    ];
-
-    function detectNamedOrg(q) {
-      // Returns the matched fragment, or null
-      return KNOWN_ORGS.find(org => q.includes(org)) || null;
-    }
-
     function detectIntent(q) {
       const has = keywords => keywords.some(k => q.includes(k));
-      const namedOrg = detectNamedOrg(q);
-      // A query is a "detail" question if it uses detail keywords OR names a specific org/program
-      const isDetail = DETAIL_KEYWORDS.some(k => q.includes(k));
       return {
-        isDetail,
-        namedOrg,       // non-null means results should be anchored to this org
+        isDetail:      DETAIL_KEYWORDS.some(k => q.includes(k)),
         isResearch:    has(KEYWORD_SETS.research),
         isFunding:     has(KEYWORD_SETS.funding),
         isEntrepreneur:has(KEYWORD_SETS.entrepreneur),
@@ -551,9 +524,9 @@
     // Filtering
     // ─────────────────────────────────────────────
     function filterResults(results, provinceFilter, intent) {
-      // Province + minimum similarity (raised slightly to reduce noise)
+      // Province + minimum similarity
       let filtered = results.filter(r =>
-        provinceFilter.includes(r.province) && (r.similarity || 0) > 0.27
+        provinceFilter.includes(r.province) && (r.similarity || 0) > 0.25
       );
 
       // Sort by similarity descending
@@ -608,24 +581,13 @@
         );
       }
 
-      // If the query names a specific institution, keep only results from that org
-      if (intent.namedOrg) {
-        const orgFragment = intent.namedOrg.toLowerCase();
-        const orgAnchored = filtered.filter(r =>
-          (r.organization_name || "").toLowerCase().includes(orgFragment)
-        );
-        // Only apply if it yields results — prevents total wipeout on partial matches
-        if (orgAnchored.length > 0) filtered = orgAnchored;
-      }
-
       return filtered;
     }
 
     // ─────────────────────────────────────────────
     // GPT response generation
     // ─────────────────────────────────────────────
-    async function generateResponse(question, results, province, intent) {
-      const isDetailMode = intent.isDetail || !!intent.namedOrg;
+    async function generateResponse(question, results, province) {
       const context = results.slice(0, 10).map(r => `
         Program: ${r.program || "N/A"}
         Program Description: ${r.program_description || "N/A"}
@@ -638,31 +600,6 @@
         Org Link: ${r.org_link || "N/A"}
         ---`).join("\n");
 
-      const systemPrompt = isDetailMode
-                ? `You are an expert assistant for the Atlantic Canada innovation ecosystem.
-        The user asked a specific question about a particular organization or program.
-        Respond in PROSE — do NOT use card/list format. Write 2-4 sentences describing what it is,
-        who it serves, what it offers, and include the link. Be specific and informative.
-        If multiple entries are provided, focus on the most relevant one.
-        Province context: ${province}`
-                : `You are an expert assistant for the Atlantic Canada innovation ecosystem.
-        
-        RESPONSE RULES:
-        - Use the card format below, up to 10 results
-        - Only include results genuinely relevant to the question
-        - End with: <br><em>Showing top results. Type "export" to download the full list.</em>
-        
-        CARD FORMAT:
-        <div class="result">
-        <strong>[Program/Lab Name]</strong><br>
-        🏛️ <em>[Organization Name]</em><br>
-        📍 [Province] | 🏷️ [Industry]<br>
-        📝 [One sentence description]<br>
-        🔗 <a href="[link]" target="_blank">Learn more</a>
-        </div>
-        
-        Province context: ${province}`;
-
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -672,8 +609,41 @@
         body: JSON.stringify({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user",   content: `Question: ${question}\nProvince: ${province}\n\nRelevant data:\n${context}` },
+            {
+              role: "system",
+              content: `You are an expert assistant for the Atlantic Canada innovation ecosystem.
+              
+RESPONSE RULES:
+- For LIST questions: Use the card format below, up to 10 results
+- For DETAIL questions (tell me about, what is, how do I): Full paragraph with all available details, no cards needed
+- If asking about a SPECIFIC organization like "Memorial University ocean research" → only list programs from THAT organization
+- Only include results genuinely relevant to the question
+
+LIST FORMAT:
+<div class="result">
+<strong>[Program/Lab Name]</strong><br>
+🏛️ <em>[Organization Name]</em><br>
+📍 [Province] | 🏷️ [Industry]<br>
+📝 [One sentence description]<br>
+🔗 <a href="[link]" target="_blank">Learn more</a>
+</div>
+
+DETAIL FORMAT (for what is/ explain questions)
+<div class="result">
+<strong>[Name]</strong><br>
+🏛️ <em>[Organization]</em> | 📍 [Province]<br>
+🏷️ Industry: [industry] | Ecosystem: [ecosystem]<br>
+📝 [Full description - 2-3 sentences]<br>
+👥 Who it's for: [target audience]<br>
+🔗 <a href="[link]" target="_blank">Learn more</a>
+</div>
+
+Province context: ${province}`,
+            },
+            {
+              role: "user",
+              content: `Question: ${question}\nProvince: ${province}\n\nRelevant data:\n${context}`,
+            },
           ],
         }),
       });
@@ -780,12 +750,10 @@
           return;
         }
 
-        lastResults = results; // Save filtered set for export
-        const isDetailMode = intent.isDetail || !!intent.namedOrg;
-        if (!isDetailMode) updateResultCount(results.length);
-        else updateResultCount(0); // no export prompt for detail answers
+        lastResults = results; // Save full set for export
+        updateResultCount(results.length);
 
-        const answer = await generateResponse(question, results, province, intent);
+        const answer = await generateResponse(question, results, province);
         removeTyping();
         addMessage(answer, "bot");
 
