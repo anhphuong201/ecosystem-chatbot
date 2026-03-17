@@ -467,7 +467,7 @@
         isResearch:    has(KEYWORD_SETS.research),
         isFunding:     has(KEYWORD_SETS.funding),
         isEntrepreneur:has(KEYWORD_SETS.entrepreneur),
-        isExport:      ["export", "download", "excel", "spreadsheet"].some(k => q.includes(k)),
+        isExport:      ["download", "excel", "spreadsheet", "full list"].some(k => q.includes(k)),
         industries:    Object.keys(INDUSTRY_KEYWORDS).filter(ind =>
                          INDUSTRY_KEYWORDS[ind].some(k => q.includes(k))
                        ),
@@ -526,7 +526,7 @@
     function filterResults(results, provinceFilter, intent) {
       // Province + minimum similarity
       let filtered = results.filter(r =>
-        provinceFilter.includes(r.province) && (r.similarity || 0) > 0.25
+        provinceFilter.includes(r.province) && (r.similarity || 0) > 0.27
       );
 
       // Sort by similarity descending
