@@ -3,458 +3,830 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Ecosystem Chatbot</title>
+  <title>Atlantic Canada Ecosystem Chatbot</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --ocean:    #0a4f6e;
+      --seafoam:  #10879e;
+      --mist:     #e8f4f8;
+      --sand:     #f5f0e8;
+      --shore:    #d6e8ef;
+      --ink:      #1a2634;
+      --mid:      #4a6375;
+      --pale:     #f0f6f9;
+      --accent:   #e05c2f;
+      --white:    #ffffff;
+      --radius:   12px;
+      --shadow:   0 2px 12px rgba(10,79,110,0.10);
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; background: #f5f5f5; }
-    #chat-container {
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--sand);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Subtle wave background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 110% 0%, rgba(16,135,158,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at -10% 100%, rgba(10,79,110,0.07) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #app {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 680px;
+      height: 100vh;
+      max-height: 860px;
       display: flex;
       flex-direction: column;
-      height: 100vh;
-      max-width: 600px;
-      margin: 0 auto;
-      background: white;
+      background: var(--white);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 40px rgba(10,79,110,0.14), 0 1px 4px rgba(10,79,110,0.08);
+      overflow: hidden;
     }
+
+    /* ── Header ── */
+    #header {
+      background: var(--ocean);
+      padding: 18px 24px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    #header-icon {
+      width: 38px;
+      height: 38px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    #header-text h1 {
+      font-family: 'DM Serif Display', serif;
+      font-size: 17px;
+      color: var(--white);
+      letter-spacing: 0.01em;
+      line-height: 1.2;
+    }
+
+    #header-text p {
+      font-size: 12px;
+      color: rgba(255,255,255,0.65);
+      margin-top: 1px;
+      font-weight: 300;
+    }
+
+    #status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ffc107;
+      margin-left: auto;
+      flex-shrink: 0;
+      transition: background 0.4s;
+    }
+    #status-dot.ready { background: #4caf7d; box-shadow: 0 0 0 3px rgba(76,175,125,0.25); }
+    #status-dot.error { background: #e05c2f; }
+
+    /* ── Messages ── */
     #messages {
       flex: 1;
       overflow-y: auto;
-      padding: 16px;
+      padding: 20px 20px 8px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
+      scroll-behavior: smooth;
     }
-    .message {
-      padding: 10px 14px;
-      border-radius: 18px;
-      max-width: 95%;
-      line-height: 1.6;
+
+    #messages::-webkit-scrollbar { width: 4px; }
+    #messages::-webkit-scrollbar-track { background: transparent; }
+    #messages::-webkit-scrollbar-thumb { background: var(--shore); border-radius: 4px; }
+
+    .msg {
+      max-width: 85%;
+      animation: fadeUp 0.25s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg.user { align-self: flex-end; }
+    .msg.bot  { align-self: flex-start; }
+
+    .msg-bubble {
+      padding: 10px 15px;
+      border-radius: var(--radius);
       font-size: 14px;
+      line-height: 1.65;
     }
-    .user { background: #0070f3; color: white; align-self: flex-end; max-width: 80%; }
-    .bot { background: #e9e9e9; color: #333; align-self: flex-start; }
+
+    .msg.user .msg-bubble {
+      background: var(--ocean);
+      color: var(--white);
+      border-bottom-right-radius: 3px;
+    }
+
+    .msg.bot .msg-bubble {
+      background: var(--pale);
+      color: var(--ink);
+      border-bottom-left-radius: 3px;
+      border: 1px solid var(--shore);
+    }
+
+    /* Result cards inside bot messages */
     .result {
-      background: #f8f9fa;
-      border-left: 3px solid #0070f3;
-      padding: 10px 12px;
-      margin: 6px 0;
-      border-radius: 6px;
+      background: var(--white);
+      border: 1px solid var(--shore);
+      border-left: 3px solid var(--seafoam);
+      padding: 11px 14px;
+      margin: 7px 0;
+      border-radius: 8px;
       font-size: 13px;
-      line-height: 1.6;
+      line-height: 1.65;
+      transition: box-shadow 0.2s;
     }
-    .result a { color: #0070f3; text-decoration: none; }
+    .result:hover { box-shadow: var(--shadow); }
+    .result a { color: var(--seafoam); text-decoration: none; font-weight: 500; }
     .result a:hover { text-decoration: underline; }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 12px 15px;
+      background: var(--pale);
+      border: 1px solid var(--shore);
+      border-radius: var(--radius);
+      border-bottom-left-radius: 3px;
+      width: fit-content;
+    }
+    .typing-indicator span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--mid);
+      animation: bounce 1.2s infinite;
+    }
+    .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30% { transform: translateY(-5px); opacity: 1; }
+    }
+
+    /* ── Controls ── */
+    #controls {
+      padding: 10px 20px 0;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    #province-select {
+      padding: 7px 12px;
+      border: 1px solid var(--shore);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--ink);
+      background: var(--pale);
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #province-select:focus { border-color: var(--seafoam); }
+
+    #export-btn {
+      padding: 7px 12px;
+      border: 1px solid var(--shore);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--mid);
+      background: var(--pale);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    #export-btn:hover:not(:disabled) {
+      background: var(--shore);
+      color: var(--ocean);
+    }
+    #export-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Input area ── */
     #input-area {
       display: flex;
-      padding: 12px;
-      border-top: 1px solid #ddd;
+      padding: 12px 20px 18px;
       gap: 8px;
-      flex-wrap: wrap;
+      align-items: flex-end;
     }
-    #province-select {
-      padding: 10px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      font-size: 14px;
-    }
+
     #user-input {
       flex: 1;
-      padding: 10px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
+      padding: 11px 15px;
+      border: 1px solid var(--shore);
+      border-radius: 10px;
       font-size: 14px;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--ink);
+      background: var(--pale);
       outline: none;
-      min-width: 120px;
+      resize: none;
+      line-height: 1.5;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      min-height: 44px;
+      max-height: 100px;
     }
+    #user-input:focus {
+      border-color: var(--seafoam);
+      box-shadow: 0 0 0 3px rgba(16,135,158,0.12);
+      background: var(--white);
+    }
+    #user-input::placeholder { color: #9ab0bb; }
+
     #send-btn {
-      padding: 10px 16px;
-      background: #0070f3;
-      color: white;
+      width: 44px;
+      height: 44px;
       border: none;
-      border-radius: 8px;
+      border-radius: 10px;
+      background: var(--ocean);
+      color: var(--white);
+      font-size: 18px;
       cursor: pointer;
-      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.2s, transform 0.1s;
     }
-    #send-btn:disabled { background: #aaa; cursor: not-allowed; }
-    .typing { font-style: italic; color: #888; font-size: 13px; }
+    #send-btn:hover:not(:disabled) { background: var(--seafoam); }
+    #send-btn:active:not(:disabled) { transform: scale(0.95); }
+    #send-btn:disabled { background: var(--shore); cursor: not-allowed; }
+
+    /* Result count badge */
+    #result-count {
+      font-size: 11px;
+      color: var(--mid);
+      padding: 0 20px 6px;
+      display: none;
+    }
+    #result-count.visible { display: block; }
   </style>
 </head>
 <body>
-  <div id="chat-container">
-    <div id="messages">
-      <div class="message bot">Hi! Ask me about programs, labs, and resources for research or entrepreneurship in Atlantic Canada. Select your province below.</div>
+  <div id="app">
+
+    <div id="header">
+      <div id="header-icon">🌊</div>
+      <div id="header-text">
+        <h1>Atlantic Canada Ecosystem</h1>
+        <p>Programs · Labs · Funding · Research</p>
+      </div>
+      <div id="status-dot" title="Connecting..."></div>
     </div>
-    <div id="input-area">
+
+    <div id="messages"></div>
+
+    <div id="controls">
       <select id="province-select">
-        <option value="Atlantic Canada">Atlantic Canada</option>
-        <option value="NS">Nova Scotia</option>
-        <option value="NL">Newfoundland</option>
-        <option value="PE">PEI</option>
-        <option value="NB">New Brunswick</option>
+        <option value="Atlantic Canada">🗺 Atlantic Canada</option>
+        <option value="NS">🔵 Nova Scotia</option>
+        <option value="NL">🔴 Newfoundland</option>
+        <option value="PE">🟠 PEI</option>
+        <option value="NB">🟢 New Brunswick</option>
       </select>
-      <input id="user-input" type="text" placeholder="Ask a question..." />
-      <button id="send-btn">Send</button>
+      <button id="export-btn" disabled title="Export results to Excel">
+        ⬇ Export
+      </button>
+      <div id="result-count"></div>
     </div>
+
+    <div id="input-area">
+      <textarea id="user-input" placeholder="Ask about programs, labs, funding…" rows="1" disabled></textarea>
+      <button id="send-btn" disabled>↑</button>
+    </div>
+
   </div>
 
   <script>
-    const BACKEND_URL = "https://ecosystem-chatbot.onrender.com";
+  (() => {
+    // ─────────────────────────────────────────────
+    // Config & constants
+    // ─────────────────────────────────────────────
+    const BACKEND_URL       = "https://ecosystem-chatbot.onrender.com";
     const ATLANTIC_PROVINCES = ["NS", "NL", "PE", "NB"];
 
-    let SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY, supabaseClient;
-    let lastResults = [];
+    const KEYWORD_SETS = {
+      research:     ["research", "lab", "laboratory", "facility", "centre", "center", "institute"],
+      funding:      ["funding", "grant", "money", "investment", "capital", "finance", "loan", "financial support"],
+      entrepreneur: ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"],
+      cleanTech:    ["clean tech", "cleantech", "clean energy", "renewable", "environment"],
+    };
 
-    function expandProvince(province) {
-      if (province === "Atlantic Canada") return [...ATLANTIC_PROVINCES, "Atlantic Canada"];
-      if (ATLANTIC_PROVINCES.includes(province)) return [province, "Atlantic Canada"];
-      return [province];
+    const INDUSTRY_KEYWORDS = {
+      "Agriculture":                    ["agriculture", "agri", "farm", "crop", "farming"],
+      "Agrifood":                       ["agrifood", "food", "agri-food", "nutrition", "beverage", "brewery"],
+      "Biotechnology":                  ["biotech", "biotechnology", "biology", "genomics", "bioscience"],
+      "Climate & Environment":          ["climate", "environment", "environmental", "sustainability", "ecological", "clean energy", "clean tech"],
+      "Biology":                        ["biology", "ecological", "biodiversity", "bioresource", "habitat"],
+      "Education":                      ["education", "learning", "training", "academic", "teaching"],
+      "Health & Wellness":              ["health", "wellness", "medical", "biomedical", "clinical", "healthcare"],
+      "AI & Data Analytics":            ["ai", "artificial intelligence", "data analytics", "machine learning", "data science"],
+      "Ocean":                          ["ocean", "marine", "coastal", "underwater", "sea", "maritime"],
+      "Engineering":                    ["engineering", "engineer", "mechanical", "structural", "civil", "electrical", "chemical"],
+      "Energy":                         ["energy", "power", "electricity", "solar", "wind", "renewable energy", "grid"],
+      "ICT":                            ["ict", "information technology", "software", "digital", "cyber", "computing", "robotics"],
+      "Transportation":                 ["transportation", "transport", "logistics", "mobility"],
+      "Oil & Gas":                      ["oil", "gas", "petroleum", "natural gas", "fossil fuel", "offshore"],
+      "Mining":                         ["mining", "mineral", "extraction", "ore"],
+      "Advanced Materials & Manufacturing": ["advanced materials", "manufacturing", "materials", "composites", "3d printing"],
+      "Nutrition":                      ["nutrition", "nutritional", "diet", "food science", "nutraceutical"],
+      "Chemistry":                      ["chemistry", "chemical", "biochemistry", "molecular"],
+      "Entrepreneurship":               ["startup", "start-up", "spinoff", "founder", "company"],
+      "Aquaculture":                    ["aquaculture", "fish farming", "shellfish", "salmon", "seafood", "fisheries", "lobster"],
+      "Defense & Aerospace":            ["defense", "defence", "aerospace", "aviation", "space", "military", "navy"],
+      "Forestry":                       ["forestry", "forest", "wood", "lumber", "timber", "pulp"],
+      "Geomatics":                      ["geomatics", "gis", "geospatial", "mapping", "remote sensing"],
+    };
+
+    const DETAIL_KEYWORDS = [
+      "tell me more", "more about", "details about", "what is", "who is",
+      "describe", "explain", "contact", "how do i", "how to apply",
+      "eligibility", "what does"
+    ];
+
+    // ─────────────────────────────────────────────
+    // State
+    // ─────────────────────────────────────────────
+    let supabaseClient = null;
+    let OPENAI_API_KEY = null;
+    let lastResults    = [];
+
+    // ─────────────────────────────────────────────
+    // DOM refs
+    // ─────────────────────────────────────────────
+    const messagesEl      = document.getElementById("messages");
+    const userInput       = document.getElementById("user-input");
+    const sendBtn         = document.getElementById("send-btn");
+    const provinceSelect  = document.getElementById("province-select");
+    const exportBtn       = document.getElementById("export-btn");
+    const statusDot       = document.getElementById("status-dot");
+    const resultCount     = document.getElementById("result-count");
+
+    // ─────────────────────────────────────────────
+    // UI helpers
+    // ─────────────────────────────────────────────
+    function setReady(ready, error = false) {
+      const disabled = !ready;
+      userInput.disabled  = disabled;
+      sendBtn.disabled    = disabled;
+      statusDot.className = error ? "error" : ready ? "ready" : "";
     }
-
-    const messagesDiv = document.getElementById("messages");
-    const input = document.getElementById("user-input");
-    const btn = document.getElementById("send-btn");
-    const provinceSelect = document.getElementById("province-select");
 
     function addMessage(html, sender) {
-      const div = document.createElement("div");
-      div.className = `message ${sender}`;
-      div.innerHTML = html;
-      messagesDiv.appendChild(div);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      const wrap = document.createElement("div");
+      wrap.className = `msg ${sender}`;
+      const bubble = document.createElement("div");
+      bubble.className = "msg-bubble";
+      bubble.innerHTML = html;
+      wrap.appendChild(bubble);
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return wrap;
     }
 
+    function showTyping() {
+      const wrap = document.createElement("div");
+      wrap.className = "msg bot";
+      wrap.id = "typing";
+      wrap.innerHTML = `
+        <div class="typing-indicator">
+          <span></span><span></span><span></span>
+        </div>`;
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function removeTyping() {
+      const el = document.getElementById("typing");
+      if (el) el.remove();
+    }
+
+    function updateResultCount(n) {
+      if (n > 0) {
+        resultCount.textContent = `${n} result${n !== 1 ? "s" : ""} found — type "export" to download all`;
+        resultCount.classList.add("visible");
+        exportBtn.disabled = false;
+      } else {
+        resultCount.classList.remove("visible");
+        exportBtn.disabled = true;
+      }
+    }
+
+    // Auto-grow textarea
+    userInput.addEventListener("input", () => {
+      userInput.style.height = "auto";
+      userInput.style.height = Math.min(userInput.scrollHeight, 100) + "px";
+    });
+
+    // ─────────────────────────────────────────────
+    // Intent detection
+    // ─────────────────────────────────────────────
+    function detectIntent(q) {
+      const has = keywords => keywords.some(k => q.includes(k));
+      return {
+        isDetail:      DETAIL_KEYWORDS.some(k => q.includes(k)),
+        isResearch:    has(KEYWORD_SETS.research),
+        isFunding:     has(KEYWORD_SETS.funding),
+        isEntrepreneur:has(KEYWORD_SETS.entrepreneur),
+        isCleanTech:   has(KEYWORD_SETS.cleanTech),
+        isExport:      ["export", "download", "excel", "spreadsheet"].some(k => q.includes(k)),
+        industries:    Object.keys(INDUSTRY_KEYWORDS).filter(ind =>
+                         INDUSTRY_KEYWORDS[ind].some(k => q.includes(k))
+                       ),
+      };
+    }
+
+    // ─────────────────────────────────────────────
+    // Province helpers
+    // ─────────────────────────────────────────────
+    function expandProvince(province) {
+      if (province === "Atlantic Canada") return [...ATLANTIC_PROVINCES, "Atlantic Canada"];
+      return [province, "Atlantic Canada"];
+    }
+
+    // ─────────────────────────────────────────────
+    // Embedding
+    // ─────────────────────────────────────────────
     async function generateEmbedding(text) {
       const res = await fetch("https://api.openai.com/v1/embeddings", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`,
         },
-        body: JSON.stringify({ model: "text-embedding-3-small", input: text })
+        body: JSON.stringify({ model: "text-embedding-3-small", input: text }),
       });
+      if (!res.ok) throw new Error(`Embedding API error: ${res.status}`);
       const data = await res.json();
       return data.data[0].embedding;
     }
 
-    function exportToExcel() {
-      if (!lastResults.length) {
-        addMessage("There are no results to export yet. Please ask a question first.", "bot");
-        return;
-      }
-
-      // Sort by organization name for grouping
-      const sorted = [...lastResults].sort((a, b) =>
-        (a.organization_name || "").localeCompare(b.organization_name || "")
-      );
-
-      const exportData = sorted.map(r => ({
-        "Organization": r.organization_name || "",
-        "Program": r.program || "",
-        "Link": r.program_link || r.org_link || "",
-        "Program Description": r.program_description || ""
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Results");
-
-      // Auto-width columns
-      const colWidths = Object.keys(exportData[0]).map(key => ({
-        wch: Math.max(key.length + 2, ...exportData.map(r => (r[key] || "").toString().length))
-      }));
-      ws["!cols"] = colWidths;
-
-      const filename = `ecosystem_results_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      XLSX.writeFile(wb, filename);
-      addMessage(`📥 Downloading <strong>${exportData.length} results</strong> grouped by organization to <em>${filename}</em>`, "bot");
+    // ─────────────────────────────────────────────
+    // Supabase queries
+    // ─────────────────────────────────────────────
+    async function queryPrograms(embedding, count = 50) {
+      const { data, error } = await supabaseClient.rpc("match_program", {
+        query_embedding: embedding,
+        match_count: count,
+      });
+      if (error) throw new Error(`Supabase program query failed: ${error.message}`);
+      return data || [];
     }
 
-    async function sendMessage() {
-      const question = input.value.trim();
-      if (!question) return;
+    async function queryOrganizations(embedding, count = 50) {
+      const { data, error } = await supabaseClient.rpc("match_organization", {
+        query_embedding: embedding,
+        match_count: count,
+      });
+      if (error) throw new Error(`Supabase org query failed: ${error.message}`);
+      return data || [];
+    }
 
-      addMessage(question, "user");
-      input.value = "";
-      btn.disabled = true;
+    // ─────────────────────────────────────────────
+    // Filtering
+    // ─────────────────────────────────────────────
+    function filterResults(results, provinceFilter, intent) {
+      // Province + minimum similarity
+      let filtered = results.filter(r =>
+        provinceFilter.includes(r.province) && (r.similarity || 0) > 0.25
+      );
 
-      const typing = document.createElement("div");
-      typing.className = "message bot typing";
-      typing.textContent = "Thinking...";
-      messagesDiv.appendChild(typing);
+      // Sort by similarity descending
+      filtered.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
 
-      try {
-        const province = provinceSelect.value;
-        const provinceFilter = expandProvince(province);
+      // Industry filter (only if industries detected)
+      if (intent.industries.length > 0) {
+        const industryFiltered = filtered.filter(r => {
+          const fields = [
+            r.industry || "", r.program || "",
+            r.program_description || "", r.research_cluster || "",
+          ].map(f => f.toLowerCase());
 
-        const q = question.toLowerCase();
-        const researchKeywords = ["research", "lab", "laboratory", "facility", "centre", "center", "institute"];
-        const fundingKeywords = ["funding", "grant", "money", "investment", "capital", "finance", "loan", "financial support"];
-        const entrepreneurKeywords = ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"];
-        const cleanTechKeywords = ["clean tech", "cleantech", "clean energy", "renewable", "environment"];
-        const exportKeywords = ["export", "download", "excel", "spreadsheet", "list"];
-
-        const isResearch = researchKeywords.some(k => q.includes(k));
-        const isFunding = fundingKeywords.some(k => q.includes(k));
-        const isEntrepreneur = entrepreneurKeywords.some(k => q.includes(k));
-        const isCleanTech = cleanTechKeywords.some(k => q.includes(k));
-        const isExport = exportKeywords.some(k => q.includes(k));
-        
-        // Detect industry from question
-        const industryKeywords = {
-          "Agriculture": ["agriculture", "agri", "farm", "crop", "farming"],
-          "Agrifood": ["agrifood", "food", "agri-food", "nutrition", "beverage", "brewery"],
-          "Biotechnology": ["biotech", "biotechnology", "biology", "genomics", "bioscience"],
-          "Climate & Environment": ["climate", "environment", "environmental", "sustainability", "ecological", "clean energy", "clean tech"],
-          "Biology": ["biology", "ecological", "biodiversity", "bioresource", "habitat"],
-          "Education": ["education", "learning", "training", "academic", "teaching"],
-          "Health & Wellness": ["health", "wellness", "medical", "biomedical", "clinical", "healthcare"],
-          "History": ["history", "historical", "heritage", "archive"],
-          "Culture": ["culture", "cultural", "arts", "music"],
-          "Society": ["society", "social", "community", "public policy"],
-          "AI & Data Analytics": ["ai", "artificial intelligence", "data analytics", "machine learning", "data science"],
-          "Ocean": ["ocean", "marine", "coastal", "underwater", "sea", "maritime"],
-          "Engineering": ["engineering", "engineer", "mechanical", "structural", "civil", "electrical", "chemical"],
-          "Energy": ["energy", "power", "electricity", "solar", "wind", "renewable energy", "clean tech", "grid"],
-          "Geomatics": ["geomatics", "gis", "geospatial", "mapping", "remote sensing"],
-          "ICT": ["ict", "information technology", "software", "digital", "cyber", "computing", "robotics"],
-          "Transportation": ["transportation", "transport", "logistics", "mobility"],
-          "Oil & Gas": ["oil", "gas", "petroleum", "natural gas", "fossil fuel", "offshore"],
-          "Mining": ["mining", "mineral", "extraction", "ore"],
-          "Advanced Materials & Manufacturing": ["advanced materials", "manufacturing", "materials", "composites", "3d printing"],
-          "Nutrition": ["nutrition", "nutritional", "diet", "food science", "nutraceutical"],
-          "Chemistry": ["chemistry", "chemical", "biochemistry", "molecular"],
-          "Business": ["business", "commerce", "enterprise", "sme"],
-          "Entrepreneurship": ["business", "startup", "start-up", "spinoff", "spinoffs", "company", "founder"],
-          "Geology": ["geology", "geological", "geoscience", "rock", "sediment"],
-          "Aquaculture": ["aquaculture", "fish farming", "shellfish", "salmon", "seafood", "fisheries", "lobster"],
-          "Defense & Aerospace": ["defense", "defence", "aerospace", "aviation", "space", "military", "navy", "dual use"],
-          "Forestry": ["forestry", "forest", "wood", "lumber", "timber", "pulp"]
-        };
-        
-        // Returns empty array if no industry detected - filter will be skipped
-        const detectedIndustries = Object.keys(industryKeywords).filter(ind =>
-          industryKeywords[ind].some(k => q.includes(k))
-        );
-        
-        console.log("Detected industries:", detectedIndustries);
-    
-
-        if (isExport) {
-          messagesDiv.removeChild(typing);
-          exportToExcel();
-          btn.disabled = false;
-          input.focus();
-          return;
-        }
-
-        const embedding = await generateEmbedding(question);
-
-        let { data: results, error } = await supabaseClient.rpc("match_program", {
-          query_embedding: embedding,
-          match_count: 50
+          return intent.industries.some(ind => {
+            const kws = INDUSTRY_KEYWORDS[ind];
+            return fields.some(f => f.includes(ind.toLowerCase()) || kws.some(k => f.includes(k)));
+          });
         });
+        if (industryFiltered.length > 0) filtered = industryFiltered;
+      }
 
-        console.log("Raw results:", results ? results.length : 0, "Error:", error);
-
-        results = (results || []).filter(r =>
-          provinceFilter.includes(r.province) && (r.similarity || 0) > 0.25
+      // Ecosystem-type filters
+      if (intent.isResearch) {
+        const researchEco = ["postsecondary research", "research", "university", "college"];
+        filtered = filtered.filter(r =>
+          researchEco.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
+          KEYWORD_SETS.research.some(k =>
+            (r.program || "").toLowerCase().includes(k) ||
+            (r.program_description || "").toLowerCase().includes(k)
+          )
         );
+      }
 
-        results = results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+      if (intent.isEntrepreneur) {
+        const ecoKws = ["entrepreneur", "entrepreneurship", "startup", "start-up", "spin-off", "incubator", "accelerator"];
+        filtered = filtered.filter(r =>
+          ecoKws.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
+          KEYWORD_SETS.entrepreneur.some(k =>
+            (r.program || "").toLowerCase().includes(k) ||
+            (r.program_description || "").toLowerCase().includes(k)
+          )
+        );
+      }
 
-        if (detectedIndustries.length > 0) {
-          const industryFiltered = results.filter(r => {
-            // industry column can have multiple values like "Ocean,Agriculture,Biotechnology"
-            const industryField = (r.industry || "").toLowerCase();
-            const programField = (r.program || "").toLowerCase();
-            const descField = (r.program_description || "").toLowerCase();
-            const clusterField = (r.research_cluster || "").toLowerCase();
-        
-            return detectedIndustries.some(ind => {
-              // First try exact match against industry column
-              const exactMatch = industryField.includes(ind.toLowerCase());
-              if (exactMatch) return true;
-        
-              // Then try keyword match across all fields
-              const keywords = industryKeywords[ind];
-              return keywords.some(k =>
-                industryField.includes(k) ||
-                programField.includes(k) ||
-                descField.includes(k) ||
-                clusterField.includes(k)
-              );
-            });
-          });
-        
-          if (industryFiltered.length > 0) {
-            results = industryFiltered;
-          }
-        }
+      if (intent.isCleanTech) {
+        filtered = filtered.filter(r =>
+          ["clean", "energy", "environment"].some(kw =>
+            (r.industry || "").toLowerCase().includes(kw) ||
+            (r.program_description || "").toLowerCase().includes(kw)
+          )
+        );
+      }
 
-        if (isResearch) {
-          const researchEcosystems = ["postsecondary research", "research", "university", "college"];
-          results = results.filter(r =>
-            researchEcosystems.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
-            researchKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
-            researchKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
-          );
-        }
+      if (intent.isFunding) {
+        filtered = filtered.filter(r =>
+          ["fund", "grant"].some(kw =>
+            (r.ecosystem || "").toLowerCase().includes(kw) ||
+            (r.program || "").toLowerCase().includes(kw) ||
+            (r.program_description || "").toLowerCase().includes(kw)
+          )
+        );
+      }
 
-        if (isEntrepreneur) {
-          const entrepreneurEcosystems = ["entrepreneur", "entrepreneurship", "startup", "start-up", "spin-off", "incubator", "accelerator"];
-          results = results.filter(r =>
-            entrepreneurEcosystems.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
-            entrepreneurKeywords.some(k => (r.program || "").toLowerCase().includes(k)) ||
-            entrepreneurKeywords.some(k => (r.program_description || "").toLowerCase().includes(k))
-          );
-        }
+      return filtered;
+    }
 
-        if (isCleanTech) {
-          results = results.filter(r =>
-            (r.industry || "").toLowerCase().includes("clean") ||
-            (r.industry || "").toLowerCase().includes("energy") ||
-            (r.industry || "").toLowerCase().includes("environment") ||
-            (r.program_description || "").toLowerCase().includes("clean")
-          );
-        }
+    // ─────────────────────────────────────────────
+    // GPT response generation
+    // ─────────────────────────────────────────────
+    async function generateResponse(question, results, province) {
+      const context = results.slice(0, 10).map(r => `
+        Program: ${r.program || "N/A"}
+        Program Description: ${r.program_description || "N/A"}
+        Organization: ${r.organization_name || "N/A"}
+        Organization Description: ${r.org_description || "N/A"}
+        Ecosystem: ${r.ecosystem || "N/A"}
+        Industry: ${r.industry || "N/A"}
+        Province: ${r.province || "N/A"}
+        Program Link: ${r.program_link || "N/A"}
+        Org Link: ${r.org_link || "N/A"}
+        ---`).join("\n");
 
-        if (isFunding) {
-          results = results.filter(r =>
-            (r.ecosystem || "").toLowerCase().includes("fund") ||
-            (r.program || "").toLowerCase().includes("fund") ||
-            (r.program || "").toLowerCase().includes("grant") ||
-            (r.program_description || "").toLowerCase().includes("fund")
-          );
-        }
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are an expert assistant for the Atlantic Canada innovation ecosystem.
+              
+RESPONSE RULES:
+- For LIST questions: Use the card format below, up to 10 results
+- For DETAIL questions (tell me about, what is, how do I): Full paragraph with all available details
+- Only include results genuinely relevant to the question
 
-        if (results.length === 0) {
-          let { data: orgResults } = await supabaseClient.rpc("match_organization", {
-            query_embedding: embedding,
-            match_count: 50
-          });
-          results = (orgResults || []).filter(r =>
-            provinceFilter.includes(r.province) && (r.similarity || 0) > 0.2
-          );
-          results = results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
-        }
-
-        if (results.length === 0) {
-          messagesDiv.removeChild(typing);
-          addMessage("I couldn't find any relevant programs or organizations. Try rephrasing your question.", "bot");
-          btn.disabled = false;
-          input.focus();
-          return;
-        }
-
-        // Save FULL list for export BEFORE slicing
-        lastResults = results;
-
-        // Only show top 10 in chat
-        const displayResults = results.slice(0, 10);
-
-        const context = displayResults.map(r => `
-Program: ${r.program || "N/A"}
-Program Description: ${r.program_description || "N/A"}
-Organization: ${r.organization_name || "N/A"}
-Organization Description: ${r.org_description || "N/A"}
-Ecosystem: ${r.ecosystem || "N/A"}
-Industry: ${r.industry || "N/A"}
-Province: ${r.province || "N/A"}
-Program Link: ${r.program_link || "N/A"}
-Org Link: ${r.org_link || "N/A"}
----`).join("\n");
-
-        const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${OPENAI_API_KEY}`
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content: `You are a helpful assistant for the Atlantic Canada innovation ecosystem.
-You help researchers, entrepreneurs, startups, and students find relevant programs, labs, funding, and organizations.
-
-IMPORTANT RULES:
-- "research lab" or "lab" means physical research facilities at universities or institutions. Do NOT include incubators, accelerators, or startup programs unless specifically asked.
-- "funding" or "grant" means financial programs only.
-- "startup" or "entrepreneur" or "spinoff" means asking about incubators, accelerators, pitch competitions.
-- Always match the INTENT of the question, not just keywords in the name.
-- Only include results that are genuinely relevant to the question.
-- If a result does not clearly relate to the user's question, do NOT include it in your response even if it appears in the data.
-- Always sort results by relevance to the question, most relevant first.
-
-FORMAT your response exactly like this for each result:
+LIST FORMAT:
 <div class="result">
 <strong>[Program/Lab Name]</strong><br>
 🏛️ <em>[Organization Name]</em><br>
-📍 [Province]<br>
+📍 [Province] | 🏷️ [Industry]<br>
 📝 [One sentence description]<br>
 🔗 <a href="[link]" target="_blank">Learn more</a>
 </div>
 
-- Show up to 10 results
-- End with: <br><em>Found ${results.length} results total. Do you want to explore more or type "Export to Excel" to download the full list.</em>
-- Province context: ${province}`
-              },
-              {
-                role: "user",
-                content: `Question: ${question}\nProvince: ${province}\n\nRelevant data:\n${context}`
-              }
-            ]
-          })
-        });
+DETAIL FORMAT:
+<div class="result">
+<strong>[Name]</strong><br>
+🏛️ <em>[Organization]</em> | 📍 [Province]<br>
+🏷️ Industry: [industry] | Ecosystem: [ecosystem]<br>
+📝 [Full description - 2-3 sentences]<br>
+👥 Who it's for: [target audience]<br>
+🔗 <a href="[link]" target="_blank">Learn more</a>
+</div>
 
-        const chatData = await chatRes.json();
-        const answer = chatData.choices[0].message.content;
+Province context: ${province}`,
+            },
+            {
+              role: "user",
+              content: `Question: ${question}\nProvince: ${province}\n\nRelevant data:\n${context}`,
+            },
+          ],
+        }),
+      });
 
-        messagesDiv.removeChild(typing);
+      if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+      const data = await res.json();
+      return data.choices[0].message.content;
+    }
+
+    // ─────────────────────────────────────────────
+    // Export
+    // ─────────────────────────────────────────────
+    function exportToExcel() {
+      if (!lastResults.length) {
+        addMessage("No results to export yet — ask a question first.", "bot");
+        return;
+      }
+
+      const sorted = [...lastResults].sort((a, b) =>
+        (a.organization_name || "").localeCompare(b.organization_name || "")
+      );
+
+      const rows = sorted.map(r => ({
+        "Organization":       r.organization_name || "",
+        "Program":            r.program || "",
+        "Link":               r.program_link || r.org_link || "",
+        "Program Description":r.program_description || "",
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = Object.keys(rows[0]).map(key => ({
+        wch: Math.max(key.length + 2, ...rows.map(r => (r[key] || "").toString().length)),
+      }));
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Results");
+
+      const filename = `ecosystem_results_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+      addMessage(`📥 Downloading <strong>${rows.length} results</strong> to <em>${filename}</em>`, "bot");
+    }
+
+    // ─────────────────────────────────────────────
+    // Main send handler
+    // ─────────────────────────────────────────────
+    async function sendMessage() {
+      const question = userInput.value.trim();
+      if (!question || sendBtn.disabled) return;
+
+      addMessage(question, "user");
+      userInput.value = "";
+      userInput.style.height = "auto";
+      sendBtn.disabled = true;
+
+      const q       = question.toLowerCase();
+      const intent  = detectIntent(q);
+
+      // Handle export request
+      if (intent.isExport) {
+        exportToExcel();
+        sendBtn.disabled = false;
+        userInput.focus();
+        return;
+      }
+
+      showTyping();
+
+      try {
+        const province       = provinceSelect.value;
+        const provinceFilter = expandProvince(province);
+        const embedding      = await generateEmbedding(question);
+
+        let results = [];
+
+        if (intent.isDetail) {
+          // For detail queries: search both tables in parallel, merge by similarity
+          const [programResults, orgResults] = await Promise.all([
+            queryPrograms(embedding, 10),
+            queryOrganizations(embedding, 5),
+          ]);
+          const combined = [
+            ...(programResults).map(r => ({ ...r, _type: "program" })),
+            ...(orgResults).map(r => ({ ...r, _type: "organization" })),
+          ].sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+          results = combined.filter(r => (r.similarity || 0) > 0.3).slice(0, 5);
+        } else {
+          // Standard: search programs then filter
+          results = await queryPrograms(embedding, 50);
+          results = filterResults(results, provinceFilter, intent);
+
+          // Fallback to orgs if no program results
+          if (results.length === 0) {
+            const orgResults = await queryOrganizations(embedding, 50);
+            results = orgResults.filter(r =>
+              provinceFilter.includes(r.province) && (r.similarity || 0) > 0.2
+            ).sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+          }
+        }
+
+        if (results.length === 0) {
+          removeTyping();
+          addMessage("I couldn't find any relevant programs or organizations. Try rephrasing your question.", "bot");
+          updateResultCount(0);
+          return;
+        }
+
+        lastResults = results; // Save full set for export
+        updateResultCount(results.length);
+
+        const answer = await generateResponse(question, results, province);
+        removeTyping();
         addMessage(answer, "bot");
 
       } catch (err) {
-        messagesDiv.removeChild(typing);
-        console.error("Error:", err);
-        addMessage("Error: " + err.message, "bot");
+        removeTyping();
+        console.error("sendMessage error:", err);
+        addMessage(`Something went wrong: ${err.message}`, "bot");
+      } finally {
+        sendBtn.disabled = false;
+        userInput.focus();
       }
-
-      btn.disabled = false;
-      input.focus();
     }
 
+    // ─────────────────────────────────────────────
+    // Init
+    // ─────────────────────────────────────────────
     async function init() {
-      let retries = 3;
-      while (retries > 0) {
+      addMessage("Connecting to the ecosystem database…", "bot");
+
+      const MAX_RETRIES = 3;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           const res = await fetch(`${BACKEND_URL}/config`);
-          if (!res.ok) throw new Error(`Status ${res.status}`);
+          if (!res.ok) throw new Error(`Backend returned ${res.status}`);
           const config = await res.json();
-          SUPABASE_URL = config.supabase_url;
-          SUPABASE_KEY = config.supabase_key;
+
           OPENAI_API_KEY = config.openai_key;
-          supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-          btn.disabled = false;
-          console.log("Config loaded successfully");
+          supabaseClient = supabase.createClient(config.supabase_url, config.supabase_key);
+
+          // Clear "connecting" message and show ready state
+          messagesEl.innerHTML = "";
+          addMessage("Hi! Ask me about programs, labs, funding, and resources for research or entrepreneurship in Atlantic Canada. Select your province to narrow results.", "bot");
+          setReady(true);
           return;
+
         } catch (err) {
-          retries--;
-          console.error(`Config load failed, retries left: ${retries}`, err);
-          if (retries > 0) await new Promise(r => setTimeout(r, 2000));
+          console.error(`Init attempt ${attempt} failed:`, err);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, 2000 * attempt)); // back-off
+          }
         }
       }
-      addMessage("Failed to load configuration. Please refresh the page.", "bot");
+
+      // All retries exhausted
+      messagesEl.innerHTML = "";
+      addMessage("⚠️ Failed to connect after several attempts. Please refresh the page.", "bot");
+      setReady(false, true);
     }
 
-    btn.disabled = true;
-    btn.addEventListener("click", sendMessage);
-    input.addEventListener("keydown", e => {
-      if (e.key === "Enter") sendMessage();
+    // ─────────────────────────────────────────────
+    // Event listeners
+    // ─────────────────────────────────────────────
+    sendBtn.addEventListener("click", sendMessage);
+    exportBtn.addEventListener("click", exportToExcel);
+    userInput.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
     });
 
     init();
+  })();
   </script>
 </body>
 </html>
