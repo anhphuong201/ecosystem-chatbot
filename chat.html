@@ -383,6 +383,10 @@
       "eligibility", "what does"
     ];
 
+    const ORG_NAMES = q.match(/(?:at|about|for|from)\s+([a-z\s]+university|[a-z\s]+centre|[a-z\s]+center|[a-z\s]+institute|[a-z\s]+college)/i);
+    const MENTION_ORG = ORG_NAMES ? ORG_NAMES[1].trim() : null;
+    console.log("Mentioned org:", MENTION_ORG);
+
     // ─────────────────────────────────────────────
     // State
     // ─────────────────────────────────────────────
@@ -748,6 +752,21 @@ Province context: ${province}`,
           addMessage("I couldn't find any relevant programs or organizations. Try rephrasing your question.", "bot");
           updateResultCount(0);
           return;
+        }
+
+        // If user mentioned a specific org, filter results to that org only
+        const orgMatch = q.match(/(?:at|about|for|from|of)\s+([a-zA-Z\s]+(?:university|centre|center|institute|college|lab|memorial|dalhousie|acadia|genesis|mun))/i);
+        const mentionedOrg = orgMatch ? orgMatch[1].trim() : null;
+        console.log("Mentioned org:", mentionedOrg);
+
+        if (mentionedOrg) {
+          const orgFiltered = results.filter(r =>
+            (r.organization_name || "").toLowerCase().includes(mentionedOrg.toLowerCase())
+          );
+          if (orgFiltered.length > 0) {
+            results = orgFiltered;
+            console.log("Filtered to org:", mentionedOrg, "Results:", results.length);
+          }
         }
 
         lastResults = results; // Save full set for export
