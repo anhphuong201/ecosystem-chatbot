@@ -28,3 +28,7 @@ def get_config():
         "supabase_key": SUPABASE_KEY,
         "openai_key": OPENAI_API_KEY
     }
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
