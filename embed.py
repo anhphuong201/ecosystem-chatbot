@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
+from flask import Flask, send_from_directory
 import os
 
 app = FastAPI()
@@ -33,3 +34,9 @@ def get_config():
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return JSONResponse({"status": "ok"})
+
+app = Flask(__name__)
+
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    return send_from_directory('static', filename)
