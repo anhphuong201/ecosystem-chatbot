@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 import os
 
 app = FastAPI()
@@ -29,6 +30,6 @@ def get_config():
         "openai_key": OPENAI_API_KEY
     }
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    return {"status": "ok"}
+    return JSONResponse({"status": "ok"})
