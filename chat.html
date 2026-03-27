@@ -91,7 +91,7 @@
     }
 
     #header-text p {
-      font-size: 12px;
+      font-size: 10.5px;
       color: rgba(255,255,255,0.65);
       margin-top: 1px;
       font-weight: 300;
@@ -347,7 +347,7 @@
     const ATLANTIC_PROVINCES = ["NS", "NL", "PE", "NB"];
 
     const KEYWORD_SETS = {
-      research:     ["research", "lab", "laboratory", "facility", "centre", "center", "institute"],
+      research:     ["research", "lab", "laboratory", "facility", "centre", "center", "institute", "network institution"],
       funding:      ["funding", "grant", "money", "investment", "capital", "finance", "loan", "financial support"],
       entrepreneur: ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"]
     };
@@ -620,6 +620,7 @@ RESPONSE RULES:
 - For DETAIL questions (tell me about, what is, how do I): Full paragraph with all available details, no cards needed
 - If asking about a SPECIFIC organization like "Memorial University ocean research" → only list programs from THAT organization
 - Only include results genuinely relevant to the question
+- If one of results show programs or organization of Springboard Atlantic, put this on the top show.
 
 LIST FORMAT:
 <div class="result">
