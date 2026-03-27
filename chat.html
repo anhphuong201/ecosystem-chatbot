@@ -754,17 +754,30 @@ Province context: ${province}`,
         }
 
         // If user mentioned a specific org, filter results to that org only
-        const orgMatch = q.match(/(?:at|about|for|from|of)\s+([a-zA-Z\s]+(?:university|centre|center|institute|college|lab|memorial|dalhousie|acadia|genesis|mun))/i);
-        const mentionedOrg = orgMatch ? orgMatch[1].trim() : null;
-        console.log("Mentioned org:", mentionedOrg);
-
-        if (mentionedOrg) {
+        // Match against actual org names that appear in results
+        const allOrgNames = [...new Set(results.map(r => r.organization_name).filter(Boolean))];
+        const mentionedOrg = allOrgNames.find(orgName =>
+          q.includes(orgName.toLowerCase())
+        );
+        
+        // Also try partial word match for orgs with 2+ word names
+        const mentionedOrgPartial = !mentionedOrg
+          ? allOrgNames.find(orgName => {
+              const words = orgName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+              return words.length >= 2 && words.every(w => q.includes(w));
+            })
+          : null;
+        
+        const matchedOrg = mentionedOrg || mentionedOrgPartial;
+        console.log("Mentioned org:", matchedOrg);
+        
+        if (matchedOrg) {
           const orgFiltered = results.filter(r =>
-            (r.organization_name || "").toLowerCase().includes(mentionedOrg.toLowerCase())
+            (r.organization_name || "").toLowerCase() === matchedOrg.toLowerCase()
           );
           if (orgFiltered.length > 0) {
             results = orgFiltered;
-            console.log("Filtered to org:", mentionedOrg, "Results:", results.length);
+            console.log("Filtered to org:", matchedOrg, "Results:", results.length);
           }
         }
 
