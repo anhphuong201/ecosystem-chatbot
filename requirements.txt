@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
-openai
-supabase
 python-dotenv
 aiofiles
+openai
+supabase
+beautifulsoup4
+requests
