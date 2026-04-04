@@ -1,13 +1,16 @@
-name: Weekly Ecosystem Scraper
+name: Quarterly Ecosystem Scraper
 
 on:
   schedule:
-    - cron: '0 2 1 1,4,7,10 *' 
-  workflow_dispatch:       # Allow manual trigger
+    - cron: '0 2 1 1,4,7,10 *'  
+  workflow_dispatch:       # Manual trigger only
+
+# Remove any 'push' or 'pull_request' triggers if present
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 360   # 6 hour timeout for large datasets
     steps:
       - uses: actions/checkout@v3
 
