@@ -39,3 +39,7 @@ def get_config():
 @app.api_route("/ping", methods=["GET", "HEAD"])
 def ping():
     return {"status": "ok"}
+
+@app.get("/favicon.ico")
+def favicon():
+    return FileResponse("static/favicon.ico")
