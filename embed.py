@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles  # ← add this
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 import os
 
 app = FastAPI()
@@ -14,7 +14,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ← add this line to serve your static/ folder
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -25,6 +24,10 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 def serve_chat():
     return FileResponse("chat.html")
 
+@app.head("/")
+def head_root():
+    return Response(status_code=200)
+
 @app.get("/config")
 def get_config():
     return {
@@ -33,6 +36,6 @@ def get_config():
         "openai_key": OPENAI_API_KEY
     }
 
-@app.api_route("/health", methods=["GET", "HEAD"])
-def health():
-    return JSONResponse({"status": "ok"})
+@app.api_route("/ping", methods=["GET", "HEAD"])
+def ping():
+    return {"status": "ok"}
