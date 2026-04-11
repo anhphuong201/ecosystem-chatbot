@@ -1,9 +1,7 @@
 name: Quarterly Ecosystem Scraper
 
 on:
-  schedule:
-    - cron: '0 2 1 1,4,7,10 *'  
-  workflow_dispatch:       # Manual trigger only
+  workflow_dispatch:  # manual only - remove schedule
 
 # Remove any 'push' or 'pull_request' triggers if present
 
