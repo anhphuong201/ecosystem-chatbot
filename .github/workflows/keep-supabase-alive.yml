@@ -1,15 +1,28 @@
 name: Keep Supabase Alive
+
 on:
   schedule:
-    - cron: '0 12 * * 1,4'
-  workflow_dispatch:         # lets you trigger it manually too
+    - cron: '0 12 * * 1,4'  # Every Monday and Thursday at noon UTC
+  workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase
+      - name: Ping Ecosystem-chatbot (organization)
         run: |
-          curl -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/your_table?select=id&limit=1" \
-            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}"
+          curl -X GET "${{ secrets.ECOSYSTEM_SUPABASE_URL }}/rest/v1/organization?select=id&limit=1" \
+            -H "apikey: ${{ secrets.ECOSYSTEM_SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.ECOSYSTEM_SUPABASE_KEY }}"
+
+      - name: Ping Ecosystem-chatbot (program)
+        run: |
+          curl -X GET "${{ secrets.ECOSYSTEM_SUPABASE_URL }}/rest/v1/program?select=id&limit=1" \
+            -H "apikey: ${{ secrets.ECOSYSTEM_SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.ECOSYSTEM_SUPABASE_KEY }}"
+
+      - name: Ping KPI-data-transform (user_keywords)
+        run: |
+          curl -X GET "${{ secrets.KPI_SUPABASE_URL }}/rest/v1/user_keywords?select=id&limit=1" \
+            -H "apikey: ${{ secrets.KPI_SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.KPI_SUPABASE_KEY }}"
