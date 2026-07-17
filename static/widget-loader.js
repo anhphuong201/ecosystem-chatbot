@@ -5,6 +5,11 @@
  * pointing back at this same backend's chat.html.
  */
 (function () {
+  // Some site builders' HTML/JS embed widgets re-run embedded scripts on their
+  // own internal re-render, which would otherwise mount this twice on one page.
+  if (window.__ecoChatWidgetMounted) return;
+  window.__ecoChatWidgetMounted = true;
+
   var BACKEND_URL = (document.currentScript && new URL(document.currentScript.src).origin)
     || "https://ecosystem-chatbot.onrender.com";
 
