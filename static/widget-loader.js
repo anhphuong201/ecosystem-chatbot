@@ -28,9 +28,9 @@
       position: absolute; bottom: 76px; right: 0;\
       background: #0a4f6e; color: white;\
       padding: 11px 15px; border-radius: 14px 14px 0 14px;\
-      font-size: 13.5px; max-width: 230px; line-height: 1.55;\
+      font-size: 13.5px; width: 220px; line-height: 1.55;\
       box-shadow: 0 4px 20px rgba(10,79,110,0.35);\
-      cursor: pointer; white-space: nowrap;\
+      cursor: pointer; white-space: normal; word-wrap: break-word;\
       opacity: 0; visibility: hidden; transform: translateY(6px);\
       transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;\
       pointer-events: none;\
@@ -67,7 +67,7 @@
     <div class=\"eco-toggle-area\" id=\"eco-toggle-area\">\
       <div class=\"eco-chat-tooltip\" id=\"eco-chat-tooltip\">\
         <strong class=\"eco-tooltip-title\">Hi there! 👋</strong><br>\
-        Ask me about research &amp; entrepreneurship resources in Atlantic Canada.\
+        Ask me about research &amp; entrepreneurship resources.\
         <div class=\"eco-tooltip-hint\">Click to open →</div>\
       </div>\
       <div class=\"eco-chat-toggle\" id=\"eco-chat-toggle\">\
