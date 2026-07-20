@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Atlantic Canada Ecosystem Chatbot</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -376,8 +375,7 @@
     // ─────────────────────────────────────────────
     // State
     // ─────────────────────────────────────────────
-    let supabaseClient = null;
-    let OPENAI_API_KEY = null;
+    let backendReady   = false;
     let lastResults    = [];
     let conversationHistory = []; // [{role: 'user'|'assistant', content: string}, ...]
 
@@ -465,19 +463,32 @@
 
     // ─────────────────────────────────────────────
     // Embedding
+    // Calls our own backend, which holds the OpenAI key server-side —
+    // the browser never sees it.
     // ─────────────────────────────────────────────
     async function generateEmbedding(text) {
-      const res = await fetch("https://api.openai.com/v1/embeddings", {
+      const res = await fetch(`${BACKEND_URL}/api/embed`, {
         method: "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({ model: "text-embedding-3-small", input: text }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
       });
       if (!res.ok) throw new Error(`Embedding API error: ${res.status}`);
       const data = await res.json();
-      return data.data[0].embedding;
+      return data.embedding;
+    }
+
+    // ─────────────────────────────────────────────
+    // Chat completions — also proxied through our backend.
+    // ─────────────────────────────────────────────
+    async function chatCompletion(payload) {
+      const res = await fetch(`${BACKEND_URL}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Chat API error: ${res.status}`);
+      const data = await res.json();
+      return data.content;
     }
 
     // ─────────────────────────────────────────────
@@ -501,20 +512,14 @@
       };
 
       try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type":  "application/json",
-            "Authorization": `Bearer ${OPENAI_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            response_format: { type: "json_object" },
-            max_tokens: 300,
-            messages: [
-              {
-                role: "system",
-                content: `You turn a user's question about Atlantic Canada innovation programs/organizations into a structured search request.
+        const content = await chatCompletion({
+          model: "gpt-4o-mini",
+          response_format: { type: "json_object" },
+          max_tokens: 300,
+          messages: [
+            {
+              role: "system",
+              content: `You turn a user's question about Atlantic Canada innovation programs/organizations into a structured search request.
 
 Given the conversation so far and the new question, return JSON with exactly these keys:
 {
@@ -527,18 +532,15 @@ Given the conversation so far and the new question, return JSON with exactly the
   "referenced_entity": string|null // organization or program name this is a follow-up about, resolved from conversation history if needed
 }
 Return ONLY valid JSON.`,
-              },
-              {
-                role: "user",
-                content: `Conversation so far:\n${historyText || "(none)"}\n\nNew question: ${question}`,
-              },
-            ],
-          }),
+            },
+            {
+              role: "user",
+              content: `Conversation so far:\n${historyText || "(none)"}\n\nNew question: ${question}`,
+            },
+          ],
         });
 
-        if (!res.ok) throw new Error(`Query understanding API error: ${res.status}`);
-        const data = await res.json();
-        const parsed = JSON.parse(data.choices[0].message.content);
+        const parsed = JSON.parse(content);
         return { ...fallback, ...parsed };
       } catch (err) {
         console.error("understandQuery failed, falling back to raw question:", err);
@@ -547,24 +549,29 @@ Return ONLY valid JSON.`,
     }
 
     // ─────────────────────────────────────────────
-    // Supabase queries
+    // Supabase queries — proxied through our backend, which holds the
+    // Supabase key server-side.
     // ─────────────────────────────────────────────
     async function queryPrograms(embedding, count = 50) {
-      const { data, error } = await supabaseClient.rpc("match_program", {
-        query_embedding: embedding,
-        match_count: count,
+      const res = await fetch(`${BACKEND_URL}/api/search/programs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embedding, match_count: count }),
       });
-      if (error) throw new Error(`Supabase program query failed: ${error.message}`);
-      return data || [];
+      if (!res.ok) throw new Error(`Program search failed: ${res.status}`);
+      const data = await res.json();
+      return data.data || [];
     }
 
     async function queryOrganizations(embedding, count = 50) {
-      const { data, error } = await supabaseClient.rpc("match_organization", {
-        query_embedding: embedding,
-        match_count: count,
+      const res = await fetch(`${BACKEND_URL}/api/search/organizations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embedding, match_count: count }),
       });
-      if (error) throw new Error(`Supabase org query failed: ${error.message}`);
-      return data || [];
+      if (!res.ok) throw new Error(`Organization search failed: ${res.status}`);
+      const data = await res.json();
+      return data.data || [];
     }
 
     // ─────────────────────────────────────────────
@@ -642,18 +649,12 @@ Return ONLY valid JSON.`,
       const historyMessages = history.slice(-MAX_HISTORY_PAIRS * 2)
         .map(h => ({ role: h.role, content: h.content }));
 
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `You are an expert assistant for the Atlantic Canada innovation ecosystem, having an ongoing conversation with the user.
+      return chatCompletion({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert assistant for the Atlantic Canada innovation ecosystem, having an ongoing conversation with the user.
 
 RESPONSE RULES:
 - Use the conversation history to understand follow-up questions, pronouns ("it", "that one"), and references to things discussed earlier.
@@ -685,19 +686,14 @@ DETAIL FORMAT (for what is/ explain questions)
 </div>
 
 Province context: ${province}`,
-            },
-            ...historyMessages,
-            {
-              role: "user",
-              content: `Question: ${question}${preferenceLines.length ? `\nInferred preferences: ${preferenceLines.join("; ")}` : ""}\nProvince: ${province}\n\nRelevant data:\n${context}`,
-            },
-          ],
-        }),
+          },
+          ...historyMessages,
+          {
+            role: "user",
+            content: `Question: ${question}${preferenceLines.length ? `\nInferred preferences: ${preferenceLines.join("; ")}` : ""}\nProvince: ${province}\n\nRelevant data:\n${context}`,
+          },
+        ],
       });
-
-      if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
-      const data = await res.json();
-      return data.choices[0].message.content;
     }
 
     // ─────────────────────────────────────────────
@@ -846,12 +842,9 @@ Province context: ${province}`,
       const MAX_RETRIES = 3;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-          const res = await fetch(`${BACKEND_URL}/config`);
+          const res = await fetch(`${BACKEND_URL}/ping`);
           if (!res.ok) throw new Error(`Backend returned ${res.status}`);
-          const config = await res.json();
-
-          OPENAI_API_KEY = config.openai_key;
-          supabaseClient = supabase.createClient(config.supabase_url, config.supabase_key);
+          backendReady = true;
 
           // Clear "connecting" message and show ready state
           messagesEl.innerHTML = "";
