@@ -559,6 +559,8 @@ Given the conversation so far and the new question, return JSON with exactly the
 }
 
 If the question refers to an organization by a well-known abbreviation or nickname (e.g. MUN = Memorial University, UNB = University of New Brunswick, Dal = Dalhousie University, SMU = Saint Mary's University, StFX = St. Francis Xavier University, UPEI = University of Prince Edward Island, CBU = Cape Breton University, NSCC = Nova Scotia Community College, NBCC = New Brunswick Community College, or any other institution abbreviation you recognize), always expand it to the full institution name in standalone_question, search_query, and referenced_entity.
+
+If this question is narrowing or filtering the topic already being discussed (e.g. the previous turn listed "3D printing research programs" and the new question is "which one belongs to UNB") rather than starting an entirely new topic, standalone_question and search_query MUST preserve the earlier topic combined with the new filter — never drop it. Example: history discusses 3D printing research; new question "which one belongs to UNB" → standalone_question: "Which of the 3D printing research programs is offered by the University of New Brunswick?", search_query: "3D printing research University of New Brunswick", referenced_entity: "University of New Brunswick".
 Return ONLY valid JSON.`,
             },
             {
@@ -794,42 +796,59 @@ Province context: ${province}`,
         const searchText          = understanding.search_query || expandedQuestion;
         const standaloneQuestion  = understanding.standalone_question || expandedQuestion;
 
-        const embedding = await generateEmbedding(searchText);
-
         let results = [];
 
-        if (understanding.is_detail_question) {
-          const [programResults, orgResults] = await Promise.all([
-            queryPrograms(embedding, 15),
-            queryOrganizations(embedding, 8),
-          ]);
-          const combined = [
-            ...programResults.map(r => ({ ...r, _type: "program" })),
-            ...orgResults.map(r => ({ ...r, _type: "organization" })),
-          ];
-          results = rankResults(combined, provinceFilter, understanding).slice(0, 8);
-        } else {
-          results = await queryPrograms(embedding, 50);
-          results = rankResults(results, provinceFilter, understanding);
-
-          // Fallback to orgs if no program results
-          if (results.length === 0) {
-            const orgResults = await queryOrganizations(embedding, 50);
-            results = rankResults(orgResults, provinceFilter, understanding);
-          }
-          results = results.slice(0, 15);
+        // If this looks like "narrow the list you just showed me by org X",
+        // filter that exact previous result set first. It's already
+        // relevant to the earlier topic (e.g. "3D printing"), so narrowing
+        // it by org name preserves that topic. A fresh vector search for
+        // "<topic> <org>" can drift toward the org and lose the topic
+        // entirely, pulling in every program that org offers.
+        if (!understanding.is_detail_question && understanding.referenced_entity && lastResults.length > 0) {
+          const target = expandAbbreviations(understanding.referenced_entity).toLowerCase();
+          results = lastResults.filter(r =>
+            (r.organization_name || "").toLowerCase().includes(target) ||
+            target.includes((r.organization_name || "").toLowerCase())
+          );
         }
 
-        // Follow-up: bias toward a specific entity GPT identified from history.
-        // Expand abbreviations defensively in case GPT still returned one raw.
-        if (understanding.referenced_entity) {
-          const target = expandAbbreviations(understanding.referenced_entity).toLowerCase();
-          const entityMatch = results.filter(r =>
-            (r.organization_name || "").toLowerCase().includes(target) ||
-            target.includes((r.organization_name || "").toLowerCase()) ||
-            (r.program || "").toLowerCase().includes(target)
-          );
-          if (entityMatch.length > 0) results = entityMatch;
+        if (results.length === 0) {
+          const embedding = await generateEmbedding(searchText);
+
+          if (understanding.is_detail_question) {
+            const [programResults, orgResults] = await Promise.all([
+              queryPrograms(embedding, 15),
+              queryOrganizations(embedding, 8),
+            ]);
+            const combined = [
+              ...programResults.map(r => ({ ...r, _type: "program" })),
+              ...orgResults.map(r => ({ ...r, _type: "organization" })),
+            ];
+            results = rankResults(combined, provinceFilter, understanding).slice(0, 8);
+          } else {
+            results = await queryPrograms(embedding, 50);
+            results = rankResults(results, provinceFilter, understanding);
+
+            // Fallback to orgs if no program results
+            if (results.length === 0) {
+              const orgResults = await queryOrganizations(embedding, 50);
+              results = rankResults(orgResults, provinceFilter, understanding);
+            }
+            results = results.slice(0, 15);
+          }
+
+          // Bias toward a specific entity GPT identified, as a safety net
+          // on top of the fresh search (defensively re-expand abbreviations
+          // in case GPT still returned one raw).
+          if (understanding.referenced_entity) {
+            const target = expandAbbreviations(understanding.referenced_entity).toLowerCase();
+            const entityMatch = results.filter(r =>
+              (r.organization_name || "").toLowerCase().includes(target) ||
+              target.includes((r.organization_name || "").toLowerCase()) ||
+              (r.program || "").toLowerCase().includes(target)
+            );
+            if (entityMatch.length > 0) results = entityMatch;
+          }
         }
 
         if (results.length === 0) {
