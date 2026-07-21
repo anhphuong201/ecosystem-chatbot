@@ -372,6 +372,32 @@
       "Geomatics":                      ["geomatics", "gis", "geospatial", "mapping", "remote sensing"],
     };
 
+    // Common abbreviations for Atlantic Canada postsecondary institutions.
+    // Embeddings and literal name matching both do poorly on bare acronyms,
+    // so these get expanded to the full name before search/interpretation.
+    const INSTITUTION_ABBREVIATIONS = {
+      "mun":   "Memorial University",
+      "unb":   "University of New Brunswick",
+      "dal":   "Dalhousie University",
+      "smu":   "Saint Mary's University",
+      "stfx":  "St. Francis Xavier University",
+      "upei":  "University of Prince Edward Island",
+      "cbu":   "Cape Breton University",
+      "msvu":  "Mount Saint Vincent University",
+      "nscc":  "Nova Scotia Community College",
+      "nbcc":  "New Brunswick Community College",
+      "cna":   "College of the North Atlantic",
+    };
+
+    function expandAbbreviations(text) {
+      let expanded = text;
+      for (const [abbr, fullName] of Object.entries(INSTITUTION_ABBREVIATIONS)) {
+        const re = new RegExp(`\\b${abbr}\\b`, "gi");
+        expanded = expanded.replace(re, `${fullName} (${abbr.toUpperCase()})`);
+      }
+      return expanded;
+    }
+
     // ─────────────────────────────────────────────
     // State
     // ─────────────────────────────────────────────
@@ -529,8 +555,10 @@ Given the conversation so far and the new question, return JSON with exactly the
   "funding_type": string|null,     // e.g. "non-refundable grant", "refundable/repayable", "loan", "equity investment" — or null if not about funding
   "audience": string|null,         // e.g. "startup", "researcher", "postsecondary institution", "established company" — or null
   "is_detail_question": boolean,   // true if asking to explain/describe one specific thing rather than get a list
-  "referenced_entity": string|null // organization or program name this is a follow-up about, resolved from conversation history if needed
+  "referenced_entity": string|null // organization or program name this is about, resolved from conversation history if needed
 }
+
+If the question refers to an organization by a well-known abbreviation or nickname (e.g. MUN = Memorial University, UNB = University of New Brunswick, Dal = Dalhousie University, SMU = Saint Mary's University, StFX = St. Francis Xavier University, UPEI = University of Prince Edward Island, CBU = Cape Breton University, NSCC = Nova Scotia Community College, NBCC = New Brunswick Community College, or any other institution abbreviation you recognize), always expand it to the full institution name in standalone_question, search_query, and referenced_entity.
 Return ONLY valid JSON.`,
             },
             {
@@ -759,9 +787,12 @@ Province context: ${province}`,
 
         // Step 1: understand the question — resolve follow-ups against
         // history, extract soft filters, decide list vs. detail intent.
-        const understanding = await understandQuery(question, conversationHistory);
-        const searchText          = understanding.search_query || question;
-        const standaloneQuestion  = understanding.standalone_question || question;
+        // Institution abbreviations (MUN, UNB, ...) are expanded first so
+        // they're resolved even if the understanding call itself fails.
+        const expandedQuestion = expandAbbreviations(question);
+        const understanding = await understandQuery(expandedQuestion, conversationHistory);
+        const searchText          = understanding.search_query || expandedQuestion;
+        const standaloneQuestion  = understanding.standalone_question || expandedQuestion;
 
         const embedding = await generateEmbedding(searchText);
 
@@ -789,9 +820,10 @@ Province context: ${province}`,
           results = results.slice(0, 15);
         }
 
-        // Follow-up: bias toward a specific entity GPT identified from history
+        // Follow-up: bias toward a specific entity GPT identified from history.
+        // Expand abbreviations defensively in case GPT still returned one raw.
         if (understanding.referenced_entity) {
-          const target = understanding.referenced_entity.toLowerCase();
+          const target = expandAbbreviations(understanding.referenced_entity).toLowerCase();
           const entityMatch = results.filter(r =>
             (r.organization_name || "").toLowerCase().includes(target) ||
             target.includes((r.organization_name || "").toLowerCase()) ||
