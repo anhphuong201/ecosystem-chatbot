@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Atlantic Canada Ecosystem Chatbot</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -345,12 +344,7 @@
     // ─────────────────────────────────────────────
     const BACKEND_URL       = "https://ecosystem-chatbot.onrender.com";
     const ATLANTIC_PROVINCES = ["NS", "NL", "PE", "NB"];
-
-    const KEYWORD_SETS = {
-      research:     ["research", "lab", "laboratory", "facility", "centre", "center", "institute", "network institution"],
-      funding:      ["funding", "grant", "money", "investment", "capital", "finance", "loan", "financial support"],
-      entrepreneur: ["entrepreneur", "entrepreneurship", "start-up", "startup", "spin-off", "new business", "founder", "incubator"]
-    };
+    const MAX_HISTORY_PAIRS = 4; // how many prior user+assistant exchanges to keep in context
 
     const INDUSTRY_KEYWORDS = {
       "Agriculture":                    ["agriculture", "agri", "farm", "crop", "farming"],
@@ -378,19 +372,12 @@
       "Geomatics":                      ["geomatics", "gis", "geospatial", "mapping", "remote sensing"],
     };
 
-    const DETAIL_KEYWORDS = [
-      "tell me more", "more about", "details about", "what is", "who is",
-      "describe", "explain", "contact", "how do i", "how to apply",
-      "eligibility", "what does"
-    ];
-
-
     // ─────────────────────────────────────────────
     // State
     // ─────────────────────────────────────────────
-    let supabaseClient = null;
-    let OPENAI_API_KEY = null;
+    let backendReady   = false;
     let lastResults    = [];
+    let conversationHistory = []; // [{role: 'user'|'assistant', content: string}, ...]
 
     // ─────────────────────────────────────────────
     // DOM refs
@@ -460,20 +447,10 @@
     });
 
     // ─────────────────────────────────────────────
-    // Intent detection
+    // Small helpers
     // ─────────────────────────────────────────────
-    function detectIntent(q) {
-      const has = keywords => keywords.some(k => q.includes(k));
-      return {
-        isDetail:      DETAIL_KEYWORDS.some(k => q.includes(k)),
-        isResearch:    has(KEYWORD_SETS.research),
-        isFunding:     has(KEYWORD_SETS.funding),
-        isEntrepreneur:has(KEYWORD_SETS.entrepreneur),
-        isExport:      ["download", "excel", "spreadsheet", "full list"].some(k => q.includes(k)),
-        industries:    Object.keys(INDUSTRY_KEYWORDS).filter(ind =>
-                         INDUSTRY_KEYWORDS[ind].some(k => q.includes(k))
-                       ),
-      };
+    function stripHtml(html) {
+      return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     }
 
     // ─────────────────────────────────────────────
@@ -486,111 +463,173 @@
 
     // ─────────────────────────────────────────────
     // Embedding
+    // Calls our own backend, which holds the OpenAI key server-side —
+    // the browser never sees it.
     // ─────────────────────────────────────────────
     async function generateEmbedding(text) {
-      const res = await fetch("https://api.openai.com/v1/embeddings", {
+      const res = await fetch(`${BACKEND_URL}/api/embed`, {
         method: "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({ model: "text-embedding-3-small", input: text }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
       });
       if (!res.ok) throw new Error(`Embedding API error: ${res.status}`);
       const data = await res.json();
-      return data.data[0].embedding;
+      return data.embedding;
     }
 
     // ─────────────────────────────────────────────
-    // Supabase queries
+    // Chat completions — also proxied through our backend.
+    // ─────────────────────────────────────────────
+    async function chatCompletion(payload) {
+      const res = await fetch(`${BACKEND_URL}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Chat API error: ${res.status}`);
+      const data = await res.json();
+      return data.content;
+    }
+
+    // ─────────────────────────────────────────────
+    // Query understanding
+    // Resolves follow-ups against history and extracts soft
+    // filters instead of relying on brittle keyword regex.
+    // ─────────────────────────────────────────────
+    async function understandQuery(question, history) {
+      const historyText = history.slice(-MAX_HISTORY_PAIRS * 2)
+        .map(h => `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`)
+        .join("\n");
+
+      const fallback = {
+        standalone_question: question,
+        search_query: question,
+        industry: null,
+        funding_type: null,
+        audience: null,
+        is_detail_question: false,
+        referenced_entity: null,
+      };
+
+      try {
+        const content = await chatCompletion({
+          model: "gpt-4o-mini",
+          response_format: { type: "json_object" },
+          max_tokens: 300,
+          messages: [
+            {
+              role: "system",
+              content: `You turn a user's question about Atlantic Canada innovation programs/organizations into a structured search request.
+
+Given the conversation so far and the new question, return JSON with exactly these keys:
+{
+  "standalone_question": string,   // question rewritten to be fully self-contained, resolving "it"/"that one"/named references using the conversation history. If already self-contained, return unchanged.
+  "search_query": string,          // short focused phrase (5-15 words) capturing ONLY the core topic to search for. Strip filler like "help me find", "I have a", personal framing.
+  "industry": string|null,         // one of: Agriculture, Agrifood, Biotechnology, Climate & Environment, Education, Health & Wellness, AI & Data Analytics, Ocean, Engineering, Energy, ICT, Transportation, Oil & Gas, Mining, Advanced Materials & Manufacturing, Nutrition, Chemistry, Entrepreneurship, Aquaculture, Defense & Aerospace, Forestry, Geomatics — or null
+  "funding_type": string|null,     // e.g. "non-refundable grant", "refundable/repayable", "loan", "equity investment" — or null if not about funding
+  "audience": string|null,         // e.g. "startup", "researcher", "postsecondary institution", "established company" — or null
+  "is_detail_question": boolean,   // true if asking to explain/describe one specific thing rather than get a list
+  "referenced_entity": string|null // organization or program name this is a follow-up about, resolved from conversation history if needed
+}
+Return ONLY valid JSON.`,
+            },
+            {
+              role: "user",
+              content: `Conversation so far:\n${historyText || "(none)"}\n\nNew question: ${question}`,
+            },
+          ],
+        });
+
+        const parsed = JSON.parse(content);
+        return { ...fallback, ...parsed };
+      } catch (err) {
+        console.error("understandQuery failed, falling back to raw question:", err);
+        return fallback;
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    // Supabase queries — proxied through our backend, which holds the
+    // Supabase key server-side.
     // ─────────────────────────────────────────────
     async function queryPrograms(embedding, count = 50) {
-      const { data, error } = await supabaseClient.rpc("match_program", {
-        query_embedding: embedding,
-        match_count: count,
+      const res = await fetch(`${BACKEND_URL}/api/search/programs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embedding, match_count: count }),
       });
-      if (error) throw new Error(`Supabase program query failed: ${error.message}`);
-      return data || [];
+      if (!res.ok) throw new Error(`Program search failed: ${res.status}`);
+      const data = await res.json();
+      return data.data || [];
     }
 
     async function queryOrganizations(embedding, count = 50) {
-      const { data, error } = await supabaseClient.rpc("match_organization", {
-        query_embedding: embedding,
-        match_count: count,
+      const res = await fetch(`${BACKEND_URL}/api/search/organizations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embedding, match_count: count }),
       });
-      if (error) throw new Error(`Supabase org query failed: ${error.message}`);
-      return data || [];
+      if (!res.ok) throw new Error(`Organization search failed: ${res.status}`);
+      const data = await res.json();
+      return data.data || [];
     }
 
     // ─────────────────────────────────────────────
-    // Filtering
+    // Ranking
+    // Only province + a low similarity floor are hard filters.
+    // Everything else (industry/funding/audience) is a soft boost,
+    // so a good match never gets dropped just for missing a literal
+    // keyword — the final GPT step applies real judgment on top.
     // ─────────────────────────────────────────────
-    function filterResults(results, provinceFilter, intent) {
-      // Province + minimum similarity
-      let filtered = results.filter(r =>
-        provinceFilter.includes(r.province) && (r.similarity || 0) > 0.27
+    function rankResults(results, provinceFilter, understanding) {
+      let candidates = results.filter(r =>
+        provinceFilter.includes(r.province) && (r.similarity || 0) > 0.2
       );
 
-      // Sort by similarity descending
-      filtered.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+      const { industry, funding_type: fundingType, audience } = understanding;
 
-      // Industry filter (only if industries detected)
-      if (intent.industries.length > 0) {
-        const industryFiltered = filtered.filter(r => {
-          const fields = [
-            r.industry || "", r.program || "",
-            r.program_description || "", r.research_cluster || "",
-          ].map(f => f.toLowerCase());
+      candidates = candidates.map(r => {
+        let boost = 0;
+        const fields = [
+          r.industry || "", r.program || "", r.program_description || "",
+          r.research_cluster || "", r.ecosystem || "", r.organization_name || "",
+          r.org_description || "",
+        ].join(" ").toLowerCase();
 
-          return intent.industries.some(ind => {
-            const kws = INDUSTRY_KEYWORDS[ind];
-            return fields.some(f => f.includes(ind.toLowerCase()) || kws.some(k => f.includes(k)));
-          });
-        });
-        if (industryFiltered.length > 0) filtered = industryFiltered;
-      }
+        if (industry) {
+          const kws = INDUSTRY_KEYWORDS[industry] || [industry.toLowerCase()];
+          if (fields.includes(industry.toLowerCase()) || kws.some(k => fields.includes(k))) boost += 0.15;
+        }
 
-      // Ecosystem-type filters
-      if (intent.isResearch) {
-        const researchEco = ["postsecondary research", "research", "university", "college"];
-        filtered = filtered.filter(r =>
-          researchEco.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
-          KEYWORD_SETS.research.some(k =>
-            (r.program || "").toLowerCase().includes(k) ||
-            (r.program_description || "").toLowerCase().includes(k)
-          )
-        );
-      }
+        if (fundingType) {
+          const fundingWords = ["fund", "grant", "loan", "invest", "capital", "financial", "contribution"];
+          if (fundingWords.some(k => fields.includes(k))) boost += 0.1;
 
-      if (intent.isEntrepreneur) {
-        const ecoKws = ["entrepreneur", "entrepreneurship", "startup", "start-up", "spin-off", "incubator", "accelerator"];
-        filtered = filtered.filter(r =>
-          ecoKws.some(e => (r.ecosystem || "").toLowerCase().includes(e)) ||
-          KEYWORD_SETS.entrepreneur.some(k =>
-            (r.program || "").toLowerCase().includes(k) ||
-            (r.program_description || "").toLowerCase().includes(k)
-          )
-        );
-      }
+          const nuance = fundingType.toLowerCase();
+          if (nuance.includes("non-refundable") && fields.includes("non-refundable")) boost += 0.1;
+          if (nuance.includes("refundable") && !nuance.includes("non-refundable") &&
+              (fields.includes("repayable") || fields.includes("refundable"))) boost += 0.1;
+          if (nuance.includes("loan") && fields.includes("loan")) boost += 0.1;
+          if (nuance.includes("equity") && fields.includes("equity")) boost += 0.1;
+        }
 
-      if (intent.isFunding) {
-        filtered = filtered.filter(r =>
-          ["fund", "grant"].some(kw =>
-            (r.ecosystem || "").toLowerCase().includes(kw) ||
-            (r.program || "").toLowerCase().includes(kw) ||
-            (r.program_description || "").toLowerCase().includes(kw)
-          )
-        );
-      }
+        if (audience) {
+          const words = audience.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+          if (words.some(w => fields.includes(w))) boost += 0.05;
+        }
 
-      return filtered;
+        return { ...r, _rank: (r.similarity || 0) + boost };
+      });
+
+      candidates.sort((a, b) => b._rank - a._rank);
+      return candidates;
     }
 
     // ─────────────────────────────────────────────
     // GPT response generation
     // ─────────────────────────────────────────────
-    async function generateResponse(question, results, province) {
-      const context = results.slice(0, 10).map(r => `
+    async function generateResponse(question, results, province, history, understanding) {
+      const context = results.slice(0, 12).map(r => `
         Program: ${r.program || "N/A"}
         Program Description: ${r.program_description || "N/A"}
         Organization: ${r.organization_name || "N/A"}
@@ -602,24 +641,28 @@
         Org Link: ${r.org_link || "N/A"}
         ---`).join("\n");
 
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `You are an expert assistant for the Atlantic Canada innovation ecosystem.
-              
+      const preferenceLines = [];
+      if (understanding.industry)     preferenceLines.push(`Industry focus: ${understanding.industry}`);
+      if (understanding.funding_type) preferenceLines.push(`Funding type requested: ${understanding.funding_type}`);
+      if (understanding.audience)     preferenceLines.push(`Audience: ${understanding.audience}`);
+
+      const historyMessages = history.slice(-MAX_HISTORY_PAIRS * 2)
+        .map(h => ({ role: h.role, content: h.content }));
+
+      return chatCompletion({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert assistant for the Atlantic Canada innovation ecosystem, having an ongoing conversation with the user.
+
 RESPONSE RULES:
+- Use the conversation history to understand follow-up questions, pronouns ("it", "that one"), and references to things discussed earlier.
+- The "Relevant data" below is a candidate set found by search — it is NOT strictly pre-filtered. Use your own judgment, together with any inferred preferences given, to pick out ONLY the items that genuinely answer the question. It's fine to use just 1-2 items, or none.
+- If nothing in the candidate set genuinely matches, say so honestly and suggest how to rephrase — never force in irrelevant results just to fill the list.
 - For LIST questions: Use the card format below, up to 10 results
 - For DETAIL questions (tell me about, what is, how do I): Full paragraph with all available details, no cards needed
 - If asking about a SPECIFIC organization like "Memorial University ocean research" → only list programs from THAT organization
-- Only include results genuinely relevant to the question
 - If one of results show programs or organization of Springboard Atlantic, put this on the top show.
 - Some abbreviations like IP is Intellectual Property, AI is Artificial Intelligence
 
@@ -643,18 +686,14 @@ DETAIL FORMAT (for what is/ explain questions)
 </div>
 
 Province context: ${province}`,
-            },
-            {
-              role: "user",
-              content: `Question: ${question}\nProvince: ${province}\n\nRelevant data:\n${context}`,
-            },
-          ],
-        }),
+          },
+          ...historyMessages,
+          {
+            role: "user",
+            content: `Question: ${question}${preferenceLines.length ? `\nInferred preferences: ${preferenceLines.join("; ")}` : ""}\nProvince: ${province}\n\nRelevant data:\n${context}`,
+          },
+        ],
       });
-
-      if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
-      const data = await res.json();
-      return data.choices[0].message.content;
     }
 
     // ─────────────────────────────────────────────
@@ -702,11 +741,10 @@ Province context: ${province}`,
       userInput.style.height = "auto";
       sendBtn.disabled = true;
 
-      const q       = question.toLowerCase();
-      const intent  = detectIntent(q);
+      const q = question.toLowerCase();
 
-      // Handle export request
-      if (intent.isExport) {
+      // Handle export request (plain keyword check — cheap, no need for GPT)
+      if (["download", "excel", "spreadsheet", "full list"].some(k => q.includes(k))) {
         exportToExcel();
         sendBtn.disabled = false;
         userInput.focus();
@@ -718,76 +756,72 @@ Province context: ${province}`,
       try {
         const province       = provinceSelect.value;
         const provinceFilter = expandProvince(province);
-        const embedding      = await generateEmbedding(question);
+
+        // Step 1: understand the question — resolve follow-ups against
+        // history, extract soft filters, decide list vs. detail intent.
+        const understanding = await understandQuery(question, conversationHistory);
+        const searchText          = understanding.search_query || question;
+        const standaloneQuestion  = understanding.standalone_question || question;
+
+        const embedding = await generateEmbedding(searchText);
 
         let results = [];
 
-        if (intent.isDetail) {
-          // For detail queries: search both tables in parallel, merge by similarity
+        if (understanding.is_detail_question) {
           const [programResults, orgResults] = await Promise.all([
-            queryPrograms(embedding, 10),
-            queryOrganizations(embedding, 5),
+            queryPrograms(embedding, 15),
+            queryOrganizations(embedding, 8),
           ]);
           const combined = [
-            ...(programResults).map(r => ({ ...r, _type: "program" })),
-            ...(orgResults).map(r => ({ ...r, _type: "organization" })),
-          ].sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
-          results = combined.filter(r => (r.similarity || 0) > 0.3).slice(0, 5);
+            ...programResults.map(r => ({ ...r, _type: "program" })),
+            ...orgResults.map(r => ({ ...r, _type: "organization" })),
+          ];
+          results = rankResults(combined, provinceFilter, understanding).slice(0, 8);
         } else {
-          // Standard: search programs then filter
           results = await queryPrograms(embedding, 50);
-          results = filterResults(results, provinceFilter, intent);
+          results = rankResults(results, provinceFilter, understanding);
 
           // Fallback to orgs if no program results
           if (results.length === 0) {
             const orgResults = await queryOrganizations(embedding, 50);
-            results = orgResults.filter(r =>
-              provinceFilter.includes(r.province) && (r.similarity || 0) > 0.2
-            ).sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+            results = rankResults(orgResults, provinceFilter, understanding);
           }
+          results = results.slice(0, 15);
+        }
+
+        // Follow-up: bias toward a specific entity GPT identified from history
+        if (understanding.referenced_entity) {
+          const target = understanding.referenced_entity.toLowerCase();
+          const entityMatch = results.filter(r =>
+            (r.organization_name || "").toLowerCase().includes(target) ||
+            target.includes((r.organization_name || "").toLowerCase()) ||
+            (r.program || "").toLowerCase().includes(target)
+          );
+          if (entityMatch.length > 0) results = entityMatch;
         }
 
         if (results.length === 0) {
           removeTyping();
           addMessage("I couldn't find any relevant programs or organizations. Try rephrasing your question.", "bot");
           updateResultCount(0);
+          conversationHistory.push({ role: "user", content: question });
+          conversationHistory.push({ role: "assistant", content: "No relevant results were found." });
           return;
-        }
-
-        // If user mentioned a specific org, filter results to that org only
-        // Match against actual org names that appear in results
-        const allOrgNames = [...new Set(results.map(r => r.organization_name).filter(Boolean))];
-        const mentionedOrg = allOrgNames.find(orgName =>
-          q.includes(orgName.toLowerCase())
-        );
-        
-        // Also try partial word match for orgs with 2+ word names
-        const mentionedOrgPartial = !mentionedOrg
-          ? allOrgNames.find(orgName => {
-              const words = orgName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-              return words.length >= 2 && words.every(w => q.includes(w));
-            })
-          : null;
-        
-        const matchedOrg = mentionedOrg || mentionedOrgPartial;
-        console.log("Mentioned org:", matchedOrg);
-        
-        if (matchedOrg) {
-          const orgFiltered = results.filter(r =>
-            (r.organization_name || "").toLowerCase() === matchedOrg.toLowerCase()
-          );
-          if (orgFiltered.length > 0) {
-            results = orgFiltered;
-            console.log("Filtered to org:", matchedOrg, "Results:", results.length);
-          }
         }
 
         lastResults = results; // Save full set for export
         updateResultCount(results.length);
 
-        const answer = await generateResponse(question, results, province);
+        const answer = await generateResponse(standaloneQuestion, results, province, conversationHistory, understanding);
         removeTyping();
         addMessage(answer, "bot");
+
+        // Save this exchange to history, capped to the last N pairs
+        conversationHistory.push({ role: "user", content: question });
+        conversationHistory.push({ role: "assistant", content: stripHtml(answer) });
+        if (conversationHistory.length > MAX_HISTORY_PAIRS * 2) {
+          conversationHistory = conversationHistory.slice(-MAX_HISTORY_PAIRS * 2);
+        }
 
       } catch (err) {
         removeTyping();
@@ -808,12 +842,9 @@ Province context: ${province}`,
       const MAX_RETRIES = 3;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-          const res = await fetch(`${BACKEND_URL}/config`);
+          const res = await fetch(`${BACKEND_URL}/ping`);
           if (!res.ok) throw new Error(`Backend returned ${res.status}`);
-          const config = await res.json();
-
-          OPENAI_API_KEY = config.openai_key;
-          supabaseClient = supabase.createClient(config.supabase_url, config.supabase_key);
+          backendReady = true;
 
           // Clear "connecting" message and show ready state
           messagesEl.innerHTML = "";
