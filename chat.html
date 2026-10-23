@@ -346,6 +346,16 @@
     const ATLANTIC_PROVINCES = ["NS", "NL", "PE", "NB"];
     const MAX_HISTORY_PAIRS = 4; // how many prior user+assistant exchanges to keep in context
 
+    // Result sizing. The chat shows only the top few cards, but the footer
+    // reports the full count and Export downloads every match. The other
+    // limits only bound how much is sent to the model when judging relevance.
+    const MAX_DISPLAYED_RESULTS   = 7;   // cards shown in the chat
+    const VECTOR_POOL_SIZE        = 100; // candidates pulled from vector search (backend max)
+    const MAX_SELECT_POOL         = 100; // candidates the model judges for relevance
+    const SELECT_DESCRIPTION_CHARS = 200;
+    const CARD_DESCRIPTION_CHARS  = 260;
+    const FALLBACK_RESULT_COUNT   = 25;  // shown if the relevance-judging call fails
+
     const INDUSTRY_KEYWORDS = {
       "Agriculture":                    ["agriculture", "agri", "farm", "crop", "farming"],
       "Agrifood":                       ["agrifood", "food", "agri-food", "nutrition", "beverage", "brewery"],
@@ -457,7 +467,7 @@
 
     function updateResultCount(n) {
       if (n > 0) {
-        resultCount.textContent = `${n} result${n !== 1 ? "s" : ""} found — type "export" to download all`;
+        resultCount.textContent = `${n} result${n !== 1 ? "s" : ""} found — click Export to download all as Excel`;
         resultCount.classList.add("visible");
         exportBtn.disabled = false;
       } else {
@@ -477,6 +487,83 @@
     // ─────────────────────────────────────────────
     function stripHtml(html) {
       return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    function truncate(text, max) {
+      const t = String(text ?? "").replace(/\s+/g, " ").trim();
+      if (t.length <= max) return t;
+      const cut = t.slice(0, max);
+      return cut.slice(0, Math.max(cut.lastIndexOf(" "), Math.floor(max * 0.6))).replace(/[.,;:\s]+$/, "") + "…";
+    }
+
+    function safeUrl(url) {
+      return /^https?:\/\//i.test(url || "") ? url : "";
+    }
+
+    // Same program can appear in the vector results and the sector listing.
+    function resultKey(r) {
+      return `${(r.program || "").trim().toLowerCase()}|${(r.organization_name || "").trim().toLowerCase()}`;
+    }
+
+    function matchesEntity(r, target) {
+      const org = (r.organization_name || "").toLowerCase();
+      return org.includes(target) || (org && target.includes(org)) ||
+             (r.program || "").toLowerCase().includes(target);
+    }
+
+    // ─────────────────────────────────────────────
+    // List rendering
+    // Cards are built here rather than written by the model, so a list of
+    // 90+ results is complete, instant, and can't be cut off by output limits.
+    // ─────────────────────────────────────────────
+    function renderResultCard(r) {
+      const title = r.program || r.organization_name || "Untitled";
+      const org   = r.program ? r.organization_name : "";
+      const tags  = (r.industry || "").split(",").map(t => t.trim()).filter(Boolean).slice(0, 4).join(", ");
+      const meta  = [r.province && `📍 ${escapeHtml(r.province)}`, tags && `🏷️ ${escapeHtml(tags)}`]
+                      .filter(Boolean).join(" | ");
+      const desc  = truncate(r.program_description || r.org_description, CARD_DESCRIPTION_CHARS);
+      const url   = safeUrl(r.program_link || r.org_link);
+
+      return `<div class="result">` +
+        `<strong>${escapeHtml(title)}</strong><br>` +
+        (org  ? `🏛️ <em>${escapeHtml(org)}</em><br>` : "") +
+        (meta ? `${meta}<br>` : "") +
+        (desc ? `📝 ${escapeHtml(desc)}<br>` : "") +
+        (url  ? `🔗 <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Learn more</a>` : "") +
+        `</div>`;
+    }
+
+    function springboardFirst(results) {
+      const isSpringboard = r => /springboard atlantic/i.test(r.organization_name || "");
+      return [...results.filter(isSpringboard), ...results.filter(r => !isSpringboard(r))];
+    }
+
+    // Shows the top MAX_DISPLAYED_RESULTS cards; the footer states the total
+    // found. `introHtml` must already be HTML-safe.
+    function renderListAnswer(introHtml, results) {
+      const total = results.length;
+      const cards = results.slice(0, MAX_DISPLAYED_RESULTS).map(renderResultCard).join("");
+      const footer = total > MAX_DISPLAYED_RESULTS
+        ? `Showing the top <strong>${MAX_DISPLAYED_RESULTS}</strong> of <strong>${total}</strong> results found. ` +
+          `Click <strong>Export</strong> to download all ${total} as an Excel file.`
+        : `Found <strong>${total}</strong> result${total !== 1 ? "s" : ""}. ` +
+          `Click <strong>Export</strong> to download ${total !== 1 ? "them" : "it"} as an Excel file.`;
+      return `<div>${introHtml}</div>${cards}<div>${footer}</div>`;
+    }
+
+    // What the model sees of this answer on later turns: the cards the user
+    // saw, plus the total, so follow-ups like "which are at UNB" make sense.
+    function historySummary(introHtml, results) {
+      const shown = results.slice(0, MAX_DISPLAYED_RESULTS)
+        .map(r => `${r.program || r.organization_name} (${r.organization_name})`).join("; ");
+      const more = results.length > MAX_DISPLAYED_RESULTS ? `; and ${results.length - MAX_DISPLAYED_RESULTS} more` : "";
+      return `${stripHtml(introHtml)} Found ${results.length} results. Top ${Math.min(results.length, MAX_DISPLAYED_RESULTS)} shown: ${shown}${more}`;
     }
 
     // ─────────────────────────────────────────────
@@ -535,13 +622,16 @@
         audience: null,
         is_detail_question: false,
         referenced_entity: null,
+        refines_previous_results: false,
+        whole_sector: null,
+        sector_keywords: [],
       };
 
       try {
         const content = await chatCompletion({
           model: "gpt-4o-mini",
           response_format: { type: "json_object" },
-          max_tokens: 300,
+          max_tokens: 450,
           messages: [
             {
               role: "system",
@@ -552,10 +642,13 @@ Given the conversation so far and the new question, return JSON with exactly the
   "standalone_question": string,   // question rewritten to be fully self-contained, resolving "it"/"that one"/named references using the conversation history. If already self-contained, return unchanged.
   "search_query": string,          // short focused phrase (5-15 words) capturing ONLY the core topic to search for. Strip filler like "help me find", "I have a", personal framing.
   "industry": string|null,         // one of: Agriculture, Agrifood, Biotechnology, Climate & Environment, Education, Health & Wellness, AI & Data Analytics, Ocean, Engineering, Energy, ICT, Transportation, Oil & Gas, Mining, Advanced Materials & Manufacturing, Nutrition, Chemistry, Entrepreneurship, Aquaculture, Defense & Aerospace, Forestry, Geomatics — or null
-  "funding_type": string|null,     // e.g. "non-refundable grant", "refundable/repayable", "loan", "equity investment" — or null if not about funding
+  "funding_type": string|null,     // the kind of funding the user explicitly asks for, e.g. "non-refundable grant", "refundable/repayable", "loan", "equity investment". Do not guess: null if no type is stated (including when they just say "grants" or "funding") or the question isn't about funding.
   "audience": string|null,         // e.g. "startup", "researcher", "postsecondary institution", "established company" — or null
-  "is_detail_question": boolean,   // true if asking to explain/describe one specific thing rather than get a list
-  "referenced_entity": string|null // organization or program name this is about, resolved from conversation history if needed
+  "is_detail_question": boolean,   // true ONLY if the user asks what one specific named program or organization is or does (e.g. "what is the Ocean Sciences Centre about", "tell me more about CTec"). false for any request to list, find, filter or narrow (e.g. "which one belongs to UNB", "defence activities at UNB", "what grants does MUN offer", "only the ones in NB"), even when an organization is named.
+  "referenced_entity": string|null, // the organization or program the NEW question itself is about: named directly, by abbreviation, or by a pronoun like "that one" that clearly points back to something in the conversation. null if the new question isn't about a specific organization or program. Never carry an entity over from earlier turns when the new question doesn't refer to one.
+  "refines_previous_results": boolean, // true ONLY if the new question explicitly points back at the results just shown (e.g. "which one belongs to UNB", "which of those are at MUN", "only the ones in NB", "of these..."). false if it stands on its own with its own topic (e.g. "Ocean research labs", "defence activities at UNB"), even if the topic relates to the earlier conversation.
+  "whole_sector": string|null,     // set ONLY when the user wants EVERYTHING in one entire industry sector and nothing more, e.g. "activities relevant to defence dual use", "all aquaculture programs", "list everything in energy". Must be one of the industry values above. Use null if the question adds any other criteria (a type of organization such as labs or accelerators, a funding type, an audience, a specific organization) or is about a topic narrower than a sector (e.g. "3D printing").
+  "sector_keywords": string[]      // only when whole_sector is set: 3-8 distinctive words/phrases, including alternate spellings and synonyms, that programs in that sector literally mention. Example for Defense & Aerospace: ["defence", "defense", "dual use", "dual-use", "military"]. Otherwise [].
 }
 
 If the question refers to an organization by a well-known abbreviation or nickname (e.g. MUN = Memorial University, UNB = University of New Brunswick, Dal = Dalhousie University, SMU = Saint Mary's University, StFX = St. Francis Xavier University, UPEI = University of Prince Edward Island, CBU = Cape Breton University, NSCC = Nova Scotia Community College, NBCC = New Brunswick Community College, or any other institution abbreviation you recognize), always expand it to the full institution name in standalone_question, search_query, and referenced_entity.
@@ -570,8 +663,12 @@ Return ONLY valid JSON.`,
           ],
         });
 
-        const parsed = JSON.parse(content);
-        return { ...fallback, ...parsed };
+        const understood = { ...fallback, ...JSON.parse(content) };
+        understood.whole_sector = typeof understood.whole_sector === "string" && understood.whole_sector.trim()
+          ? understood.whole_sector.trim() : null;
+        understood.sector_keywords = Array.isArray(understood.sector_keywords)
+          ? understood.sector_keywords.filter(k => typeof k === "string") : [];
+        return understood;
       } catch (err) {
         console.error("understandQuery failed, falling back to raw question:", err);
         return fallback;
@@ -600,6 +697,23 @@ Return ONLY valid JSON.`,
         body: JSON.stringify({ embedding, match_count: count }),
       });
       if (!res.ok) throw new Error(`Organization search failed: ${res.status}`);
+      const data = await res.json();
+      return data.data || [];
+    }
+
+    // Complete listings that vector search can't give: it only returns the
+    // nearest matches, so it misses programs in a large sector or from an
+    // organization with many programs. `industry`/`keywords` select a sector
+    // (tagged programs plus untagged ones that literally mention a keyword);
+    // `organization` restricts to one organization's programs (or, alone,
+    // returns all of them).
+    async function browsePrograms({ industry = null, keywords = [], organization = null }) {
+      const res = await fetch(`${BACKEND_URL}/api/programs/browse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ industry, keywords, organization }),
+      });
+      if (!res.ok) throw new Error(`Program browse failed: ${res.status}`);
       const data = await res.json();
       return data.data || [];
     }
@@ -655,8 +769,85 @@ Return ONLY valid JSON.`,
       return candidates;
     }
 
+    // Browse rows have no vector score of their own; borrow it from the
+    // search results where the same program shows up, so the most relevant
+    // come first. The rest follow alphabetically by organization.
+    function mergeBrowseRows(browseRows, vectorPool, provinceFilter) {
+      const scores = new Map(vectorPool.map(r => [resultKey(r), r.similarity || 0]));
+      return browseRows
+        .filter(r => provinceFilter.includes(r.province))
+        .map(r => ({ ...r, similarity: scores.get(resultKey(r)) ?? null }))
+        .sort((a, b) =>
+          (b.similarity ?? -1) - (a.similarity ?? -1) ||
+          (a.organization_name || "").localeCompare(b.organization_name || ""));
+    }
+
+    // ─────────────────────────────────────────────
+    // Relevance selection
+    // Replaces the old "top 15" cut: the model sees the whole candidate pool
+    // and returns the number of EVERY candidate that fits the question.
+    // The cards are then rendered locally from those numbers.
+    // ─────────────────────────────────────────────
+    async function selectRelevant(question, pool, understanding) {
+      const candidates = pool.slice(0, MAX_SELECT_POOL);
+
+      const list = candidates.map((r, i) =>
+        `${i}. ${r.program || r.organization_name} | ${r.program ? r.organization_name : "organization"} | ` +
+        `${r.province || ""} | ${r.industry ? `industries: ${r.industry} | ` : ""}` +
+        `${truncate(r.program_description || r.org_description, SELECT_DESCRIPTION_CHARS)}`
+      ).join("\n");
+
+      const preferences = [];
+      if (understanding.industry)     preferences.push(`Industry focus: ${understanding.industry}`);
+      if (understanding.funding_type) preferences.push(`Funding type requested: ${understanding.funding_type}`);
+      if (understanding.audience)     preferences.push(`Audience: ${understanding.audience}`);
+
+      try {
+        const content = await chatCompletion({
+          model: "gpt-4o-mini",
+          response_format: { type: "json_object" },
+          max_tokens: 1000,
+          messages: [
+            {
+              role: "system",
+              content: `You filter search results for a chatbot about the Atlantic Canada innovation ecosystem.
+You receive the user's question and a numbered list of candidate programs/organizations (number | name | organization | province | industries (when known) | description). An "industries" tag such as Defense & Aerospace is a strong signal that a program belongs to that sector. Return JSON:
+{ "relevant": number[], "intro": string }
+
+- "relevant": the number of EVERY candidate that genuinely answers the question. Do not stop at a few good ones and do not cap the list — include them all. Include candidates whose focus clearly matches the topic; leave out ones that only share a loose keyword or are about something else.
+- Treat any inferred preferences (funding type, audience, industry) as real criteria, not hints.
+- If the question asks for a specific kind of thing (labs, grants, accelerators, ...), include only that kind.
+- "intro": one short plain-text sentence introducing the list, without stating how many there are (the page reports the count itself). If nothing fits, say so honestly and suggest how to rephrase.
+Return ONLY valid JSON.`,
+            },
+            {
+              role: "user",
+              content: `Question: ${question}${preferences.length ? `\nInferred preferences: ${preferences.join("; ")}` : ""}\n\nCandidates:\n${list}`,
+            },
+          ],
+        });
+
+        const parsed = JSON.parse(content);
+        const picked = [...new Set((Array.isArray(parsed.relevant) ? parsed.relevant : []).map(Number))]
+          .filter(n => Number.isInteger(n) && n >= 0 && n < candidates.length)
+          .sort((a, b) => a - b); // keep the original relevance order
+        return {
+          results: picked.map(i => candidates[i]),
+          intro: typeof parsed.intro === "string" ? parsed.intro.trim() : "",
+        };
+      } catch (err) {
+        console.error("selectRelevant failed, showing the closest matches instead:", err);
+        return {
+          results: candidates.slice(0, FALLBACK_RESULT_COUNT),
+          intro: "Here are the closest matches I found.",
+        };
+      }
+    }
+
     // ─────────────────────────────────────────────
     // GPT response generation
+    // Now used for detail questions ("what is X about"); list answers are
+    // rendered locally from the full result set.
     // ─────────────────────────────────────────────
     async function generateResponse(question, results, province, history, understanding) {
       const context = results.slice(0, 12).map(r => `
@@ -743,7 +934,7 @@ Province context: ${province}`,
         "Organization":       r.organization_name || "",
         "Program":            r.program || "",
         "Link":               r.program_link || r.org_link || "",
-        "Program Description":r.program_description || "",
+        "Program Description":r.program_description || r.org_description || "",
       }));
 
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -796,26 +987,41 @@ Province context: ${province}`,
         const searchText          = understanding.search_query || expandedQuestion;
         const standaloneQuestion  = understanding.standalone_question || expandedQuestion;
 
-        let results = [];
+        let results      = [];
+        let introHtml    = "";   // intro line for list answers (must be HTML-safe)
+        let isListAnswer = true; // false → free-text answer for detail questions
 
-        // If this looks like "narrow the list you just showed me by org X",
-        // filter that exact previous result set first. It's already
-        // relevant to the earlier topic (e.g. "3D printing"), so narrowing
-        // it by org name preserves that topic. A fresh vector search for
-        // "<topic> <org>" can drift toward the org and lose the topic
-        // entirely, pulling in every program that org offers.
-        if (!understanding.is_detail_question && understanding.referenced_entity && lastResults.length > 0) {
+        // "Narrow the list you just showed me by org X": filter that exact
+        // previous result set. It's already relevant to the earlier topic
+        // (e.g. "3D printing"), so narrowing it by org preserves that topic;
+        // a fresh search for "<topic> <org>" drifts toward the org and loses
+        // it. Only when the question actually refines the last results —
+        // a fresh question that merely names an org must not be answered
+        // from an unrelated earlier list.
+        if (!understanding.is_detail_question && understanding.refines_previous_results &&
+            understanding.referenced_entity && lastResults.length > 0) {
           const target = expandAbbreviations(understanding.referenced_entity).toLowerCase();
-          results = lastResults.filter(r =>
-            (r.organization_name || "").toLowerCase().includes(target) ||
-            target.includes((r.organization_name || "").toLowerCase())
-          );
+          results = lastResults.filter(r => matchesEntity(r, target));
+          if (results.length > 0) {
+            introHtml = `From the previous results, these match <strong>${escapeHtml(understanding.referenced_entity)}</strong>:`;
+          }
         }
 
         if (results.length === 0) {
           const embedding = await generateEmbedding(searchText);
 
+          // Bias toward a specific entity the model identified, when any
+          // candidate matches it (abbreviations re-expanded defensively in
+          // case the model still returned one raw).
+          const entity = understanding.referenced_entity
+            ? expandAbbreviations(understanding.referenced_entity).toLowerCase() : null;
+          const biasToEntity = list => {
+            const matched = entity ? list.filter(r => matchesEntity(r, entity)) : [];
+            return matched.length > 0 ? matched : list;
+          };
+
           if (understanding.is_detail_question) {
+            isListAnswer = false;
             const [programResults, orgResults] = await Promise.all([
               queryPrograms(embedding, 15),
               queryOrganizations(embedding, 8),
@@ -824,52 +1030,93 @@ Province context: ${province}`,
               ...programResults.map(r => ({ ...r, _type: "program" })),
               ...orgResults.map(r => ({ ...r, _type: "organization" })),
             ];
-            results = rankResults(combined, provinceFilter, understanding).slice(0, 8);
+            results = biasToEntity(rankResults(combined, provinceFilter, understanding).slice(0, 8));
           } else {
-            results = await queryPrograms(embedding, 50);
-            results = rankResults(results, provinceFilter, understanding);
+            let pool = rankResults(await queryPrograms(embedding, VECTOR_POOL_SIZE), provinceFilter, understanding);
+
+            // A question about an entire sector ("defence dual use") gets
+            // every program in that sector, not just the nearest matches.
+            let wholeSector = false;
+            if (understanding.whole_sector) {
+              try {
+                const sectorRows = await browsePrograms({
+                  industry: understanding.whole_sector,
+                  keywords: understanding.sector_keywords,
+                });
+                const merged = mergeBrowseRows(sectorRows, pool, provinceFilter);
+                if (merged.length > 0) {
+                  pool = merged;
+                  wholeSector = true;
+                }
+              } catch (err) {
+                console.error("Sector browse failed, using search results instead:", err);
+              }
+            } else if (understanding.referenced_entity) {
+              // The question names an organization ("defence activities at
+              // UNB"). Search only returns the nearest 100 programs overall,
+              // so most of that organization's programs may not be in it;
+              // start from the organization's own complete list instead.
+              try {
+                const orgRows = await browsePrograms({
+                  organization: understanding.referenced_entity.replace(/\s*\([^)]*\)\s*$/, "").trim(),
+                });
+                const merged = mergeBrowseRows(orgRows, pool, provinceFilter);
+                if (merged.length > 0) pool = merged;
+              } catch (err) {
+                console.error("Organization browse failed, using search results instead:", err);
+              }
+            }
 
             // Fallback to orgs if no program results
-            if (results.length === 0) {
+            if (pool.length === 0) {
               const orgResults = await queryOrganizations(embedding, 50);
-              results = rankResults(orgResults, provinceFilter, understanding);
+              pool = rankResults(orgResults, provinceFilter, understanding);
             }
-            results = results.slice(0, 15);
-          }
 
-          // Bias toward a specific entity GPT identified, as a safety net
-          // on top of the fresh search (defensively re-expand abbreviations
-          // in case GPT still returned one raw).
-          if (understanding.referenced_entity) {
-            const target = expandAbbreviations(understanding.referenced_entity).toLowerCase();
-            const entityMatch = results.filter(r =>
-              (r.organization_name || "").toLowerCase().includes(target) ||
-              target.includes((r.organization_name || "").toLowerCase()) ||
-              (r.program || "").toLowerCase().includes(target)
-            );
-            if (entityMatch.length > 0) results = entityMatch;
+            pool = biasToEntity(pool);
+
+            if (wholeSector) {
+              results = pool;
+              const where = province === "Atlantic Canada" ? "" : ` (${escapeHtml(province)} only)`;
+              introHtml = `Programs and activities in <strong>${escapeHtml(understanding.whole_sector)}</strong>${where}, most relevant first:`;
+            } else if (pool.length > 0) {
+              const picked = await selectRelevant(standaloneQuestion, pool, understanding);
+              results   = picked.results;
+              introHtml = escapeHtml(picked.intro);
+            }
           }
         }
 
         if (results.length === 0) {
           removeTyping();
-          addMessage("I couldn't find any relevant programs or organizations. Try rephrasing your question.", "bot");
+          const noneHtml = introHtml || "I couldn't find any relevant programs or organizations. Try rephrasing your question.";
+          addMessage(noneHtml, "bot");
           updateResultCount(0);
           conversationHistory.push({ role: "user", content: question });
-          conversationHistory.push({ role: "assistant", content: "No relevant results were found." });
+          conversationHistory.push({ role: "assistant", content: stripHtml(noneHtml) });
           return;
         }
 
-        lastResults = results; // Save full set for export
+        let answerHtml, historyText;
+        if (isListAnswer) {
+          results   = springboardFirst(results);
+          introHtml = introHtml || "Here are the most relevant results:";
+          answerHtml  = renderListAnswer(introHtml, results);
+          historyText = historySummary(introHtml, results);
+        } else {
+          answerHtml  = await generateResponse(standaloneQuestion, results, province, conversationHistory, understanding);
+          historyText = stripHtml(answerHtml);
+        }
+
+        lastResults = results; // Full result set — this is what Export downloads
         updateResultCount(results.length);
 
-        const answer = await generateResponse(standaloneQuestion, results, province, conversationHistory, understanding);
         removeTyping();
-        addMessage(answer, "bot");
+        addMessage(answerHtml, "bot");
 
         // Save this exchange to history, capped to the last N pairs
         conversationHistory.push({ role: "user", content: question });
-        conversationHistory.push({ role: "assistant", content: stripHtml(answer) });
+        conversationHistory.push({ role: "assistant", content: historyText });
         if (conversationHistory.length > MAX_HISTORY_PAIRS * 2) {
           conversationHistory = conversationHistory.slice(-MAX_HISTORY_PAIRS * 2);
         }
